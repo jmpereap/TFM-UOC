@@ -1,0 +1,80 @@
+name: export-on-validado
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Versión manual (opcional)"
+        required: false
+      input:
+        description: "Ruta JSON con prompts (opcional)"
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Guard push: solo si el mensaje contiene 'validado'
+        if: github.event_name == 'push'
+        run: |
+          msg="${{ github.event.head_commit.message }}"
+          echo "HEAD message: $msg"
+          echo "$msg" | grep -i "validado" || { echo "No contiene 'validado'. Saliendo"; exit 0; }
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Determinar versión
+        id: ver
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "${{ github.event.inputs.version }}" ]; then
+            echo "value=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            echo "value=${{ github.run_number }}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Ejecutar export
+        run: |
+          ARGS="--version=${{ steps.ver.outputs.value }}"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "${{ github.event.inputs.input }}" ]; then
+            ARGS="$ARGS --input=${{ github.event.inputs.input }}"
+          fi
+          echo "Args: $ARGS"
+          npm run export:prompts -- $ARGS
+
+      - name: Localizar DOCX generado
+        id: find
+        run: |
+          FILE=$(ls -t docs/prompts/validated/*.docx | head -n 1)
+          echo "file=$FILE" >> $GITHUB_OUTPUT
+          ls -l "$FILE"
+
+      - name: Subir como artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: prompts-docx
+          path: ${{ steps.find.outputs.file }}
+
+      - name: Publicar Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: validated-${{ steps.ver.outputs.value }}
+          name: Validated export ${{ steps.ver.outputs.value }}
+          files: ${{ steps.find.outputs.file }}
+

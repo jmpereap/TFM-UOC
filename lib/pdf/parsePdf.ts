@@ -1,11 +1,31 @@
 import pdfParse from 'pdf-parse'
 
-export async function parsePdf(buffer: Buffer): Promise<{ text: string; info: unknown; numPages: number }> {
-  const res = await pdfParse(buffer)
+export type ParsedPdf = {
+  text: string
+  info: unknown
+  numPages: number
+  pages: string[]
+}
+
+export async function parsePdf(buffer: Buffer): Promise<ParsedPdf> {
+  const pages: string[] = []
+  const res = await pdfParse(buffer, {
+    pagerender: async (pageData: any) => {
+      const textContent = await pageData.getTextContent({
+        normalizeWhitespace: false,
+        disableCombineTextItems: false,
+      })
+      const pageText = textContent.items.map((it: any) => it.str).join(' ')
+      pages.push(pageText)
+      return pageText
+    },
+  } as any)
+
   return {
     text: res.text || '',
     info: (res as any).info || {},
-    numPages: (res as any).numpages || 0,
+    numPages: (res as any).numpages || pages.length || 0,
+    pages,
   }
 }
 

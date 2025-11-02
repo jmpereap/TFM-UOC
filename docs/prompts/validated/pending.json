@@ -1,0 +1,11 @@
+{
+  "items": [
+    {
+      "title": "Ejemplo de prompt validado",
+      "body": "Describe el método de evaluación de X.\n- Debe incluir criterios A, B y C.\n- Referencias a la normativa vigente.",
+      "version": "1",
+      "validatedAt": "2025-11-02T18:15:00+01:00"
+    }
+  ]
+}
+

@@ -14,10 +14,16 @@ export async function POST(req: Request) {
 
     const arrayBuffer = await file.arrayBuffer()
     const buffer = Buffer.from(arrayBuffer)
-    const { text, numPages, info } = await parsePdf(buffer)
-    const blocks = splitIntoBlocks(text)
 
-    return NextResponse.json({ blocks, meta: { numPages, info } })
+    const blockSizeRaw = form.get('blockSize')
+    const overlapRaw = form.get('overlap')
+    const blockSize = Number.isFinite(Number(blockSizeRaw)) ? Math.max(1, parseInt(String(blockSizeRaw), 10)) : 5
+    const overlap = Number.isFinite(Number(overlapRaw)) ? Math.max(0, parseInt(String(overlapRaw), 10)) : 1
+
+    const { pages, numPages, info } = await parsePdf(buffer)
+    const blocks = splitIntoBlocks(pages, blockSize, overlap)
+
+    return NextResponse.json({ blocks, meta: { numPages, info, blockSize, overlap } })
   } catch (err) {
     console.error(err)
     return NextResponse.json({ error: 'Error procesando PDF' }, { status: 500 })

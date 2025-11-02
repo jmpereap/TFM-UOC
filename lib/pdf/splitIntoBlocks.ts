@@ -1,27 +1,18 @@
-export function splitIntoBlocks(text: string, maxChars = 1200): string[] {
-  const clean = (text || '').replace(/\r\n/g, '\n').trim()
-  if (!clean) return []
+export type Block = { index: number; startPage: number; endPage: number; text: string }
 
-  const paragraphs = clean.split(/\n{2,}/)
-  const blocks: string[] = []
-  let current = ''
+export function splitIntoBlocks(pages: string[], blockSize = 5, overlap = 1): Block[] {
+  const blocks: Block[] = []
+  let start = 0
+  let idx = 0
 
-  const pushCurrent = () => {
-    const trimmed = current.trim()
-    if (trimmed) blocks.push(trimmed)
-    current = ''
+  while (start < pages.length) {
+    const end = Math.min(start + blockSize, pages.length)
+    const text = pages.slice(start, end).join('\n\n')
+    blocks.push({ index: idx++, startPage: start + 1, endPage: end, text })
+    if (end === pages.length) break
+    start = end - overlap
   }
 
-  for (const p of paragraphs) {
-    if ((current + '\n\n' + p).length > maxChars && current) {
-      pushCurrent()
-    }
-    current = current ? current + '\n\n' + p : p
-    if (current.length >= maxChars) {
-      pushCurrent()
-    }
-  }
-  pushCurrent()
   return blocks
 }
 
