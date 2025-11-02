@@ -1,0 +1,57 @@
+name: backup-release
+
+on:
+  schedule:
+    # 18:15 Europe/Madrid (cron es UTC): 16:15 en verano, 17:15 en invierno
+    - cron: "15 16,17 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+concurrency:
+  group: backup-release
+  cancel-in-progress: false
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    env:
+      TZ: Europe/Madrid
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Guard 18:15 Europe/Madrid
+        if: github.event_name == 'schedule'
+        run: |
+          now="$(date +'%H%M')"
+          if [ "$now" != "1815" ]; then
+            echo "No es 18:15 Europe/Madrid ($now). Saliendo."
+            exit 0
+          fi
+
+      - name: Stamp
+        id: stamp
+        run: echo "value=$(date +'%Y%m%d-%H%M')" >> "$GITHUB_OUTPUT"
+
+      - name: Crear ZIP del repo (HEAD)
+        run: |
+          git archive --format=zip -o "backup-${{ steps.stamp.outputs.value }}.zip" HEAD
+          ls -lh "backup-${{ steps.stamp.outputs.value }}.zip"
+
+      - name: Publicar Release con el ZIP
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: backup-${{ steps.stamp.outputs.value }}
+          name: Backup ${{ steps.stamp.outputs.value }}
+          files: backup-${{ steps.stamp.outputs.value }}.zip
+
+      - name: Subir también como artifact (opcional)
+        uses: actions/upload-artifact@v4
+        with:
+          name: backup-${{ steps.stamp.outputs.value }}
+          path: backup-${{ steps.stamp.outputs.value }}.zip
+

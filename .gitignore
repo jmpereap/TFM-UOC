@@ -1,0 +1,41 @@
+# Node
+node_modules
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Next.js
+.next/
+out/
+.vercel/
+
+# TypeScript
+*.tsbuildinfo
+
+# Env files (versiona un .env.example si quieres)
+.env
+.env.*.local
+!.env.example
+
+# Logs
+logs/*.jsonl
+!logs/.gitkeep
+
+# Docs
+docs/prompts/validated/*.docx
+
+# Subidas de usuario
+uploads/**
+!uploads/.gitkeep
+
+# SO/Editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Cobertura / tooling extra
+coverage/
+.turbo/
+

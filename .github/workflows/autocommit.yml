@@ -1,0 +1,55 @@
+name: daily-autocommit
+
+on:
+  schedule:
+    # 18:15 Europe/Madrid (cron es UTC): 16:15 en verano, 17:15 en invierno
+    - cron: "15 16,17 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+concurrency:
+  group: daily-autocommit
+  cancel-in-progress: false
+
+jobs:
+  auto-commit:
+    runs-on: ubuntu-latest
+    env:
+      TZ: Europe/Madrid
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GH_PAT || secrets.GITHUB_TOKEN }}
+
+      - name: Guard 18:15 Europe/Madrid
+        if: github.event_name == 'schedule'
+        run: |
+          now="$(date +'%H%M')"
+          if [ "$now" != "1815" ]; then
+            echo "No es 18:15 Europe/Madrid ($now). Saliendo."
+            exit 0
+          fi
+
+      - name: Configure Git
+        run: |
+          git config user.name "tfm-bot"
+          git config user.email "tfm-bot@example.com"
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Pull (rebase) latest
+        run: |
+          git pull --rebase origin "${GITHUB_REF_NAME:-$(git rev-parse --abbrev-ref HEAD)}"
+
+      - name: Commit changes if any
+        run: |
+          git add -A
+          if ! git diff --cached --quiet; then
+            git commit -m "chore: daily autocommit $(date '+%Y-%m-%d %H:%M')"
+            git push origin "${GITHUB_REF_NAME:-$(git rev-parse --abbrev-ref HEAD)}"
+          else
+            echo "No changes to commit."
+
