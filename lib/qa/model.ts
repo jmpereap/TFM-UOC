@@ -53,7 +53,10 @@ async function callOpenAI(prompt: string, model: string, apiKey: string): Promis
   return { raw: content }
 }
 
-export async function callModel(prompt: string): Promise<{ items: MCQItem[]; raw: string; provider: string; model: string }>{
+export async function callModel(
+  prompt: string,
+  timeoutMs?: number,
+): Promise<{ items: MCQItem[]; raw: string; provider: string; model: string }>{
   const provider = process.env.LLM_PROVIDER || 'openai'
   const openaiKey = process.env.OPENAI_API_KEY
   const openaiModel = process.env.OPENAI_MODEL || 'gpt-4o-mini'
@@ -63,8 +66,17 @@ export async function callModel(prompt: string): Promise<{ items: MCQItem[]; raw
   try {
     if (provider === 'openai' && openaiKey) {
       model = openaiModel
-      const out = await callOpenAI(prompt, openaiModel, openaiKey)
-      raw = out.raw
+      const controller = new AbortController()
+      let timer: NodeJS.Timeout | undefined
+      if (timeoutMs && timeoutMs > 0) {
+        timer = setTimeout(() => controller.abort('timeout'), timeoutMs)
+      }
+      try {
+        const out = await callOpenAI(prompt, openaiModel, openaiKey)
+        raw = out.raw
+      } finally {
+        if (timer) clearTimeout(timer)
+      }
     } else {
       // Fallback mock: genera 1 pregunta mínima
       model = 'mock-local'

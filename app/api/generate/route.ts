@@ -3,8 +3,10 @@ import { z } from 'zod'
 import { v4 as uuidv4 } from 'uuid'
 import { distributeQuestions } from 'lib/qa/distribute'
 import { buildPrompt } from 'lib/qa/prompt'
-import { callModel, type MCQItem } from 'lib/qa/model'
+import { callModel, type MCQItem } from 'lib/qa/callModel'
 import { logEvent } from 'lib/logging/logger'
+import { truncateByChars } from 'lib/utils/truncate'
+import { withLimit } from 'lib/utils/withLimit'
 
 type Block = { index: number; startPage: number; endPage: number; text: string }
 
@@ -32,28 +34,19 @@ export async function POST(req: Request) {
     const json = await req.json()
     const { lawName, n, blocks } = InputSchema.parse(json)
     const m = blocks.length
-    const distribution = distributeQuestions(n, m)
+    const plan = distributeQuestions(n, m)
 
-    const allItems: MCQItem[] = []
-
-    for (let i = 0; i < m; i++) {
-      const qi = distribution[i]
-      if (qi <= 0) continue
-      const b = blocks[i]
+    const tasks: Array<() => Promise<MCQItem[]>> = blocks.map((b, i) => async () => {
+      const qi = plan[i]
+      if (!qi) return []
       const pagesRange = `p. ${b.startPage}–${b.endPage}`
-      const prompt = buildPrompt({ lawName, pagesRange, blockText: b.text, n: qi })
+      const safeText = truncateByChars(b.text, 10000)
+      const prompt = buildPrompt({ lawName, pagesRange, blockText: safeText, n: qi })
       const pChars = prompt.length
-      let raw = ''
-      let provider = 'unknown'
-      let model = 'unknown'
       try {
-        const r = await callModel(prompt)
-        raw = r.raw
-        provider = r.provider
-        model = r.model
-        const items = r.items.map((it) => ({
+        const itemsRaw = await callModel(prompt, 20000)
+        const items = itemsRaw.map((it) => ({
           ...it,
-          // Asegura referencia consistente
           referencia: {
             ley: lawName,
             paginas: pagesRange,
@@ -61,24 +54,26 @@ export async function POST(req: Request) {
             parrafo: it.referencia?.parrafo,
           },
         }))
-        allItems.push(...items)
         logEvent('generate.block.success', {
           reqId,
           blockIndex: b.index,
           count: items.length,
-          provider,
-          model,
           promptChars: pChars,
-          responseChars: raw.length,
+          responseChars: JSON.stringify(items).length,
         })
+        return items
       } catch (err) {
         logEvent('generate.block.error', {
           reqId,
           blockIndex: b.index,
           error: String(err),
         })
+        return []
       }
-    }
+    })
+
+    const parts = await withLimit(4, tasks)
+    const allItems = parts.flat()
 
     // Deduplicate por pregunta y recortar a n
     const seen = new Set<string>()
@@ -93,13 +88,14 @@ export async function POST(req: Request) {
       if (deduped.length >= n) break
     }
 
+    if (deduped.length === 0) {
+      const dt = Date.now() - t0
+      logEvent('generate.empty', { reqId, latencyMs: dt, requested: n })
+      return NextResponse.json({ ok: false, error: 'Sin preguntas generadas' }, { status: 502 })
+    }
+
     const dt = Date.now() - t0
-    logEvent('generate.done', {
-      reqId,
-      latencyMs: dt,
-      requested: n,
-      returned: deduped.length,
-    })
+    logEvent('generate.done', { reqId, latencyMs: dt, requested: n, returned: deduped.length })
 
     return NextResponse.json({ ok: true, items: deduped })
   } catch (err: unknown) {

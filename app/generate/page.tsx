@@ -54,8 +54,11 @@ export default function GeneratePage() {
         ),
       })
       if (!res.ok) throw new Error('Falló la generación')
-      const data = (await res.json()) as { ok: boolean; items: MCQItem[] }
-      if (!data.ok) throw new Error('Respuesta no OK')
+      const data = (await res.json()) as { ok: boolean; items?: MCQItem[]; error?: any }
+      if (!data.ok) {
+        const msg = typeof data.error === 'string' ? data.error : 'Respuesta no OK'
+        throw new Error(msg)
+      }
       setResult(data.items || [])
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'Error desconocido'
