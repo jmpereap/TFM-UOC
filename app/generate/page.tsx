@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { MCQItem, OptionKey } from '@/types/mcq'
 import MCQCard from '@/components/MCQCard'
 
@@ -30,9 +30,17 @@ export default function GeneratePage() {
   const [genError, setGenError] = useState<string | null>(null)
   const [includeCorrect, setIncludeCorrect] = useState<boolean>(true)
 
-  const unanswered = useMemo(
-    () => items.reduce((acc, _, i) => acc + (answers[i] ? 0 : 1), 0),
-    [items, answers],
+  // Paginación
+  const PAGE_SIZE = 5
+  const [page, setPage] = useState(1)
+  const totalPages = Math.max(1, Math.ceil(items.length / PAGE_SIZE))
+  const pageStart = (page - 1) * PAGE_SIZE
+  const pageEnd = Math.min(items.length, page * PAGE_SIZE)
+  const pageItems = useMemo(() => items.slice(pageStart, pageEnd), [items, page, pageStart, pageEnd])
+  useEffect(() => { setPage(1) }, [items])
+  const unansweredVisible = useMemo(
+    () => pageItems.reduce((acc, _, i) => acc + (answers[pageStart + i] ? 0 : 1), 0),
+    [pageItems, answers, pageStart]
   )
 
   // Subir PDF -> /api/upload
@@ -114,15 +122,17 @@ export default function GeneratePage() {
 
   const correctAll = () => {
     let total = 0
-    const nextCorrected: Record<number, boolean> = {}
-    const nextResults: Record<number, Result> = {}
-    items.forEach((it, i) => {
-      const a = answers[i]
+    const nextCorrected: Record<number, boolean> = { ...corrected }
+    const nextResults: Record<number, Result> = { ...results }
+    for (let gi = pageStart; gi < pageEnd; gi++) {
+      const a = answers[gi]
+      const it = items[gi]
+      if (!it) continue
       const ok = a === it.correcta
-      nextCorrected[i] = true
-      nextResults[i] = { isCorrect: !!ok }
-      if (ok) total += 1
-    })
+      nextCorrected[gi] = true
+      nextResults[gi] = { isCorrect: !!ok }
+    }
+    items.forEach((it, gi) => { if (answers[gi] === it.correcta) total += 1 })
     setCorrected(nextCorrected)
     setResults(nextResults)
     setScore(total)
@@ -268,9 +278,7 @@ export default function GeneratePage() {
       <div className="rounded-2xl border border-slate-200 p-4 bg-white space-y-4">
         <div className="flex items-center justify-between">
           <div className="font-medium">3) Preguntas</div>
-          <div className="text-sm text-slate-600">
-            Sin responder: {unanswered} / {items.length}
-          </div>
+          <div className="text-sm text-slate-600">Sin responder (página): {unansweredVisible} / {pageItems.length}</div>
         </div>
         <div className="flex flex-wrap items-center gap-4">
           <button
@@ -313,21 +321,39 @@ export default function GeneratePage() {
           </div>
         </div>
         <div className="grid gap-4">
-          {items.map((it, i) => (
-            <MCQCard
-              key={i}
-              index={i}
-              item={it}
-              userAnswer={answers[i] ?? null}
-              onChange={onChangeAnswer}
-              onCorrectOne={correctOne}
-              corrected={!!corrected[i]}
-              result={results[i]}
-            />
-          ))}
+          {pageItems.map((it, i) => {
+            const gi = pageStart + i
+            return (
+              <MCQCard
+                key={gi}
+                index={gi}
+                item={it}
+                userAnswer={answers[gi] ?? null}
+                onChange={(_, value) => setAnswers((prev) => ({ ...prev, [gi]: value }))}
+                onCorrectOne={(idx) => {
+                  const a = answers[idx]
+                  if (!items[idx]) return
+                  const ok = a === items[idx].correcta
+                  setCorrected((prev) => ({ ...prev, [idx]: true }))
+                  setResults((prev) => ({ ...prev, [idx]: { isCorrect: !!ok } }))
+                }}
+                corrected={!!corrected[gi]}
+                result={results[gi]}
+              />
+            )
+          })}
           {items.length === 0 && (
             <div className="text-slate-600 text-sm">Carga un PDF y genera preguntas para empezar.</div>
           )}
+        </div>
+        <div className="flex items-center justify-between pt-2">
+          <div className="text-sm text-slate-600">
+            Mostrando {pageStart + 1}–{pageEnd} de {items.length} · Página {page} / {totalPages}
+          </div>
+          <div className="flex gap-2">
+            <button type="button" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page <= 1} className="px-3 py-2 rounded-xl bg-slate-200 text-slate-800 text-sm disabled:opacity-50">Anterior</button>
+            <button type="button" onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={page >= totalPages} className="px-3 py-2 rounded-xl bg-slate-900 text-white text-sm disabled:opacity-50">Siguiente</button>
+          </div>
         </div>
         {score !== null && (
           <div className="rounded-xl bg-slate-50 border border-slate-200 p-3 text-sm">
