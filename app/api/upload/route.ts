@@ -23,7 +23,12 @@ export async function POST(req: Request) {
     const { pages, numPages, info } = await parsePdf(buffer)
     const blocks = splitIntoBlocks(pages, blockSize, overlap)
 
-    return NextResponse.json({ blocks, meta: { numPages, info, blockSize, overlap } })
+    // Compat: expone pages (número) además de meta.numPages para clientes existentes
+    return NextResponse.json({
+      blocks,
+      pages: numPages,
+      meta: { numPages, info, blockSize, overlap },
+    })
   } catch (err) {
     console.error(err)
     return NextResponse.json({ error: 'Error procesando PDF' }, { status: 500 })
