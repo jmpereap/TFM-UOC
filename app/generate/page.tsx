@@ -28,6 +28,7 @@ export default function GeneratePage() {
   const [score, setScore] = useState<number | null>(null)
   const [generating, setGenerating] = useState(false)
   const [genError, setGenError] = useState<string | null>(null)
+  const [includeCorrect, setIncludeCorrect] = useState<boolean>(true)
 
   const unanswered = useMemo(
     () => items.reduce((acc, _, i) => acc + (answers[i] ? 0 : 1), 0),
@@ -125,6 +126,28 @@ export default function GeneratePage() {
     setCorrected(nextCorrected)
     setResults(nextResults)
     setScore(total)
+  }
+
+  async function exportItems(format: 'json' | 'csv' | 'pdf') {
+    if (items.length === 0) return
+    const res = await fetch('/api/export', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ format, items, lawName, includeCorrect }),
+    })
+    if (!res.ok) {
+      alert('Error exportando: ' + (await res.text()))
+      return
+    }
+    const blob = await res.blob()
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = format === 'json' ? 'preguntas.json' : format === 'csv' ? 'preguntas.csv' : 'preguntas.pdf'
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    URL.revokeObjectURL(url)
   }
 
   return (
@@ -249,7 +272,7 @@ export default function GeneratePage() {
             Sin responder: {unanswered} / {items.length}
           </div>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap items-center gap-4">
           <button
             type="button"
             onClick={correctAll}
@@ -258,6 +281,36 @@ export default function GeneratePage() {
           >
             Corregir todo
           </button>
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={includeCorrect} onChange={(e) => setIncludeCorrect(e.target.checked)} />
+            Incluir columna “correcta” en la exportación
+          </label>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => exportItems('json')}
+              disabled={items.length === 0}
+              className="px-3 py-2 rounded-xl bg-slate-800 text-white text-sm disabled:opacity-50"
+            >
+              Exportar JSON
+            </button>
+            <button
+              type="button"
+              onClick={() => exportItems('csv')}
+              disabled={items.length === 0}
+              className="px-3 py-2 rounded-xl bg-slate-700 text-white text-sm disabled:opacity-50"
+            >
+              Exportar CSV
+            </button>
+            <button
+              type="button"
+              onClick={() => exportItems('pdf')}
+              disabled={items.length === 0}
+              className="px-3 py-2 rounded-xl bg-slate-600 text-white text-sm disabled:opacity-50"
+            >
+              Exportar PDF
+            </button>
+          </div>
         </div>
         <div className="grid gap-4">
           {items.map((it, i) => (

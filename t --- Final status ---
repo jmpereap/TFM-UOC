@@ -1,0 +1,49 @@
+warning: in the working copy of '.env.example', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of '.github/workflows/autocommit.yml', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of '.gitignore', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'app/api/generate/route.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'app/api/upload/route.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'app/generate/page.tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'app/upload/page.tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'lib/pdf/parsePdf.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'lib/pdf/splitIntoBlocks.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'lib/qa/callModel.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'lib/qa/distribute.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'lib/qa/model.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'lib/qa/prompt.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'package.json', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'scripts/commit.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'scripts/export-prompts-to-docx.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'tsconfig.json', LF will be replaced by CRLF the next time Git touches it
+.env.example
+.eslintrc.json
+.github/workflows/backup-release.yml
+.github/workflows/export-on-validado.yml
+README.md
+app/api/log/route.ts
+app/generate/page.tsx
+app/layout.tsx
+app/page.tsx
+components/MCQCard.tsx
+docs/decisions.md
+docs/prompts/prompt_diary_template.docx
+docs/prompts/validated/.gitkeep
+docs/prompts/validated/pending.json
+lib/logging/logger.ts
+lib/qa/deduplicate.ts
+lib/utils/random.ts
+lib/utils/truncate.ts
+lib/utils/withLimit.ts
+logs/.gitkeep
+next-env.d.ts
+next.config.mjs
+package-lock.json
+package.json
+postcss.config.mjs
+public/.gitkeep
+scripts/commit.ps1
+scripts/commit.sh
+styles/globals.css
+tailwind.config.ts
+types/mcq.ts
+uploads/.gitkeep

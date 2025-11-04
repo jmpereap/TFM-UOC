@@ -5,3 +5,4 @@ export function truncateByChars(s: string, max = 10000): string {
   return s.slice(0, cut > 0 ? cut : max)
 }
 
+
