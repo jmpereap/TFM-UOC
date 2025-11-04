@@ -1,10 +1,27 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { MCQItem, OptionKey } from '@/types/mcq'
 import MCQCard from '@/components/MCQCard'
+import DragDropUpload from '@/components/DragDropUpload'
+import BlocksChips from '@/components/BlocksChips'
+import Modal from '@/components/Modal'
+import { useLocalStorage } from '@/hooks/useLocalStorage'
 
 type Result = { isCorrect: boolean }
+
+function baseNameFromFile(file?: File | null) {
+  if (!file?.name) return ''
+  return file.name.replace(/\.[^.]+$/, '')
+}
+
+function deriveLawName(metaInfo: any, file?: File | null) {
+  const title = (metaInfo?.Title || metaInfo?.title || '').toString().trim()
+  const fromMeta = title && title.length > 2 ? title : ''
+  const fromFile = baseNameFromFile(file)
+  const raw = fromMeta || fromFile || ''
+  return raw.slice(0, 80)
+}
 
 export default function GeneratePage() {
   // PDF/bloques
@@ -13,12 +30,18 @@ export default function GeneratePage() {
   const [pagesCount, setPagesCount] = useState<number | null>(null)
   const [uploading, setUploading] = useState(false)
   const [uploadError, setUploadError] = useState<string | null>(null)
-  const [blockSize, setBlockSize] = useState<number>(5)
-  const [overlap, setOverlap] = useState<number>(1)
+  const [blockSize, setBlockSize] = useLocalStorage<number>('tfm.blockSize', 5)
+  const [overlap, setOverlap] = useLocalStorage<number>('tfm.overlap', 1)
+  const [showAdvanced, setShowAdvanced] = useState(false)
+  const [showBlocksModal, setShowBlocksModal] = useState(false)
+  const viewAllBtnRef = useRef<HTMLButtonElement | null>(null)
 
   // Parámetros de generación
-  const [lawName, setLawName] = useState<string>('')
-  const [n, setN] = useState<number>(10)
+  const [lawName, setLawName] = useLocalStorage<string>('tfm.lawName', '')
+  const [userEditedLawName, setUserEditedLawName] = useLocalStorage<boolean>('tfm.userEditedLawName', false)
+  const [lockedMode, setLockedMode] = useLocalStorage<boolean>('tfm.lockedLawName', false)
+  const [lastMetaInfo, setLastMetaInfo] = useState<any>(null)
+  const [n, setN] = useLocalStorage<number>('tfm.n', 10)
 
   // Items y corrección
   const [items, setItems] = useState<MCQItem[]>([])
@@ -28,7 +51,7 @@ export default function GeneratePage() {
   const [score, setScore] = useState<number | null>(null)
   const [generating, setGenerating] = useState(false)
   const [genError, setGenError] = useState<string | null>(null)
-  const [includeCorrect, setIncludeCorrect] = useState<boolean>(true)
+  const [includeCorrect, setIncludeCorrect] = useLocalStorage<boolean>('tfm.includeCorrect', true)
 
   // Paginación
   const PAGE_SIZE = 5
@@ -42,6 +65,17 @@ export default function GeneratePage() {
     () => pageItems.reduce((acc, _, i) => acc + (answers[pageStart + i] ? 0 : 1), 0),
     [pageItems, answers, pageStart]
   )
+
+  // Validación solape y accesibilidad modal
+  const overlapMax = Math.max(0, blockSize - 1)
+  const overlapInvalid = overlap < 0 || overlap > overlapMax
+  const wasOpenRef = useRef(false)
+  useEffect(() => {
+    if (wasOpenRef.current && !showBlocksModal) {
+      viewAllBtnRef.current?.focus()
+    }
+    wasOpenRef.current = showBlocksModal
+  }, [showBlocksModal])
 
   // Subir PDF -> /api/upload
   const onUpload = async () => {
@@ -61,10 +95,10 @@ export default function GeneratePage() {
       const data = await res.json()
       setPagesCount(typeof data?.pages === 'number' ? data.pages : data?.meta?.numPages ?? null)
       setBlocks(data.blocks || [])
-      // Autocompletar el nombre de la ley con el nombre del fichero si está vacío
-      if (!lawName.trim() && pdfFile?.name) {
-        const base = pdfFile.name.replace(/\.[^.]+$/, '')
-        setLawName(base)
+      setLastMetaInfo(data?.meta?.info || null)
+      if (!userEditedLawName) {
+        const auto = deriveLawName(data?.meta?.info, pdfFile)
+        if (auto) setLawName(auto)
       }
     } catch (e: any) {
       setUploadError(e?.message || 'Error subiendo el PDF.')
@@ -164,91 +198,130 @@ export default function GeneratePage() {
     <div className="mx-auto max-w-4xl p-4 space-y-6">
       <h1 className="text-xl font-semibold">Generar preguntas desde PDF</h1>
 
-      {/* Subida de PDF en la misma página */}
+      {/* Subida de PDF con drag&drop y opciones avanzadas */}
       <div className="rounded-2xl border border-slate-200 p-4 bg-white space-y-3">
         <div className="font-medium">1) Carga el PDF de la ley/norma</div>
-        <input
-          type="file"
-          accept="application/pdf"
-          onChange={(e) => {
-            const f = e.target.files?.[0] || null
+        <DragDropUpload
+          current={pdfFile}
+          onSelect={(f) => {
             setPdfFile(f)
-            if (f && !lawName.trim()) {
-              const base = f.name.replace(/\.[^.]+$/, '')
-              setLawName(base)
+            if (f && !userEditedLawName && !lawName.trim()) {
+              setLawName(baseNameFromFile(f))
             }
           }}
         />
-        <div className="flex flex-wrap items-center gap-3 text-sm">
-          <label className="flex items-center gap-2">
-            <span>blockSize</span>
-            <input
-              type="number"
-              min={1}
-              max={50}
-              value={blockSize}
-              onChange={(e) => setBlockSize(Number(e.target.value) || 1)}
-              className="w-24 rounded border border-slate-300 p-1"
-            />
-          </label>
-          <label className="flex items-center gap-2">
-            <span>overlap</span>
-            <input
-              type="number"
-              min={0}
-              max={Math.max(0, blockSize - 1)}
-              value={overlap}
-              onChange={(e) => setOverlap(Number(e.target.value) || 0)}
-              className="w-24 rounded border border-slate-300 p-1"
-            />
-          </label>
-        </div>
-        <div className="flex gap-2">
-          <button
-            type="button"
-            onClick={onUpload}
-            disabled={uploading || !pdfFile}
-            className="px-3 py-2 rounded-xl bg-slate-900 text-white text-sm disabled:opacity-50"
-          >
-            {uploading ? 'Subiendo…' : 'Subir y detectar bloques'}
-          </button>
-        </div>
-        {!!uploadError && <div className="text-sm text-red-600">{uploadError}</div>}
-        <div className="text-sm text-slate-700">
+        <button
+          type="button"
+          onClick={onUpload}
+          disabled={uploading || !pdfFile || overlapInvalid}
+          className="px-3 py-2 rounded-xl bg-slate-900 text-white text-sm disabled:opacity-50"
+        >
+          {uploading ? 'Subiendo…' : 'Subir y detectar bloques'}
+        </button>
+        <div className="text-sm text-slate-700" aria-live="polite">
           {pagesCount !== null ? (
-            <>
-              Páginas: {pagesCount} · Bloques: {blocks.length}
-            </>
+            <>Páginas: {pagesCount} · Bloques: {blocks.length} (blockSize {blockSize}, overlap {overlap})</>
           ) : (
             'Sin datos aún.'
           )}
         </div>
-        {blocks.length > 0 && (
-          <div className="text-xs text-slate-600">
-            {blocks.slice(0, 8).map((b: any) => (
-              <span key={b.index} className="mr-2">
-                [{b.index}] p.{b.startPage}–{b.endPage}
-              </span>
-            ))}
-            {blocks.length > 8 && <span>… (+{blocks.length - 8} más)</span>}
+        {!!uploadError && <div className="text-sm text-red-600">{uploadError}</div>}
+
+        {/* Opciones avanzadas */}
+        <button type="button" onClick={() => setShowAdvanced((v) => !v)} className="text-sm underline">
+          {showAdvanced ? 'Ocultar' : 'Mostrar'} opciones avanzadas
+        </button>
+        {showAdvanced && (
+          <div className="grid gap-3 md:grid-cols-2">
+            <label className="text-sm">
+              <div className="mb-1 text-slate-600">blockSize (páginas por bloque)</div>
+              <input
+                type="number"
+                min={1}
+                value={blockSize}
+                onChange={(e) => setBlockSize(Math.max(1, Number(e.target.value) || 1))}
+                className="w-full rounded-lg border border-slate-300 p-2"
+              />
+              <div className="text-xs text-slate-500">Recomendado 4–6</div>
+            </label>
+            <label className="text-sm">
+              <div className="mb-1 text-slate-600">overlap (0..blockSize-1)</div>
+              <input
+                type="number"
+                min={0}
+                max={blockSize - 1}
+                value={overlap}
+                onChange={(e) => setOverlap(Number(e.target.value) || 0)}
+                className={`w-full rounded-lg border p-2 ${overlapInvalid ? 'border-red-500' : 'border-slate-300'}`}
+              />
+              <div className={`text-xs ${overlapInvalid ? 'text-red-600' : 'text-slate-500'}`}>
+                {overlapInvalid ? `Valor inválido. Máx: ${overlapMax}` : 'Solape recomendado: 1'}
+              </div>
+            </label>
           </div>
         )}
+
+        {/* Chips y modal */}
+        <BlocksChips blocks={blocks as any} onViewAll={() => setShowBlocksModal(true)} viewAllRef={viewAllBtnRef} />
+      </div>
+
+      {/* Identificación del cuestionario */}
+      <div className="rounded-2xl border border-slate-200 p-4 bg-white space-y-3">
+        <div className="font-medium">2) Identificación del cuestionario</div>
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex-1">
+            {!lockedMode ? (
+              <label className="text-sm block">
+                <div className="mb-1 text-slate-600">Nombre de la ley/norma</div>
+                <input
+                  type="text"
+                  value={lawName}
+                  onChange={(e) => {
+                    setLawName(e.target.value)
+                    setUserEditedLawName(true)
+                  }}
+                  className="w-full rounded-lg border border-slate-300 p-2"
+                  placeholder="p. ej., Constitución Española (consolidado)"
+                />
+                <div className="text-xs text-slate-500">Origen: meta Title del PDF o nombre de archivo</div>
+              </label>
+            ) : (
+              <div className="text-sm">
+                <div className="text-slate-600 mb-1">Nombre de la ley/norma</div>
+                <div className="flex items-center gap-2">
+                  <div className="px-2 py-1 rounded-lg border border-slate-200 bg-slate-50 text-slate-800">{lawName || '—'}</div>
+                  <button type="button" onClick={() => setLockedMode(false)} className="px-2 py-1 rounded-lg bg-slate-200 text-slate-800 text-sm">✎ Editar</button>
+                </div>
+                <div className="text-xs text-slate-500">Modo bloqueado (vista limpia)</div>
+              </div>
+            )}
+          </div>
+          <div className="shrink-0 flex flex-col items-end gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                const auto = deriveLawName(lastMetaInfo, pdfFile)
+                if (auto) {
+                  setLawName(auto)
+                  setUserEditedLawName(false)
+                }
+              }}
+              className="px-2 py-1 rounded-lg bg-slate-100 text-slate-700 text-xs"
+            >
+              ↺ Restablecer
+            </button>
+            <label className="text-xs flex items-center gap-2">
+              <input type="checkbox" checked={lockedMode} onChange={(e) => setLockedMode(e.target.checked)} />
+              Bloquear nombre (vista limpia)
+            </label>
+          </div>
+        </div>
       </div>
 
       {/* Parámetros de generación */}
       <div className="rounded-2xl border border-slate-200 p-4 bg-white space-y-3">
-        <div className="font-medium">2) Parámetros</div>
+        <div className="font-medium">3) Parámetros</div>
         <div className="grid gap-3 md:grid-cols-2">
-          <label className="text-sm">
-            <div className="mb-1 text-slate-600">Nombre de la ley/norma</div>
-            <input
-              type="text"
-              placeholder="Constitución Española (texto consolidado)"
-              value={lawName}
-              onChange={(e) => setLawName(e.target.value)}
-              className="w-full rounded-lg border border-slate-300 p-2"
-            />
-          </label>
           <label className="text-sm">
             <div className="mb-1 text-slate-600">Número de preguntas (1–20)</div>
             <input
@@ -277,7 +350,7 @@ export default function GeneratePage() {
       {/* Preguntas + corrección */}
       <div className="rounded-2xl border border-slate-200 p-4 bg-white space-y-4">
         <div className="flex items-center justify-between">
-          <div className="font-medium">3) Preguntas</div>
+          <div className="font-medium">4) Preguntas</div>
           <div className="text-sm text-slate-600">Sin responder (página): {unansweredVisible} / {pageItems.length}</div>
         </div>
         <div className="flex flex-wrap items-center gap-4">
@@ -362,6 +435,13 @@ export default function GeneratePage() {
           </div>
         )}
       </div>
+      <Modal open={showBlocksModal} onClose={() => setShowBlocksModal(false)} title="Bloques detectados">
+        <div className="grid grid-cols-2 gap-2">
+          {blocks.map((b: any) => (
+            <div key={b.index} className="text-xs rounded-lg border border-slate-200 p-2">[{b.index}] p.{b.startPage}–{b.endPage}</div>
+          ))}
+        </div>
+      </Modal>
     </div>
   )
 }
