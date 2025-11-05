@@ -4,7 +4,6 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import type { MCQItem, OptionKey } from '@/types/mcq'
 import MCQCard from '@/components/MCQCard'
 import DragDropUpload from '@/components/DragDropUpload'
-import BlocksChips from '@/components/BlocksChips'
 import Modal from '@/components/Modal'
 import { useLocalStorage } from '@/hooks/useLocalStorage'
 
@@ -22,6 +21,10 @@ function deriveLawName(metaInfo: any, file?: File | null) {
   const raw = fromMeta || fromFile || ''
   return raw.slice(0, 80)
 }
+
+const clamp = (v: number, min: number, max: number) => Math.min(max, Math.max(min, v))
+const MIN_Q = 1
+const MAX_Q = 20
 
 export default function GeneratePage() {
   // PDF/bloques
@@ -76,6 +79,74 @@ export default function GeneratePage() {
     }
     wasOpenRef.current = showBlocksModal
   }, [showBlocksModal])
+
+  // Ancla a listado y paginación numerada
+  const listRef = useRef<HTMLDivElement | null>(null)
+  function getPageNumbers(current: number, total: number, maxLength = 7): (number | string)[] {
+    if (total <= maxLength) return Array.from({ length: total }, (_, i) => i + 1)
+    const siblings = 1
+    const start = Math.max(2, current - siblings)
+    const end = Math.min(total - 1, current + siblings)
+    const pages: (number | string)[] = [1]
+    if (start > 2) pages.push('…')
+    for (let p = start; p <= end; p++) pages.push(p)
+    if (end < total - 1) pages.push('…')
+    pages.push(total)
+    return pages
+  }
+  function Paginator() {
+    const nums = getPageNumbers(page, totalPages)
+    if (items.length === 0) return null
+    return (
+      <div className="flex items-center justify-between py-2">
+        <div className="flex items-center gap-1 text-xs">
+          <button
+            type="button"
+            onClick={() => setPage((p) => Math.max(1, p - 1))}
+            disabled={page <= 1}
+            className="px-2 py-1 rounded bg-slate-200 text-slate-800 disabled:opacity-50"
+          >
+            Anterior
+          </button>
+          {nums.map((p, idx) => (
+            typeof p === 'number' ? (
+              <button
+                key={idx}
+                type="button"
+                onClick={() => setPage(p)}
+                className={`px-2 py-1 rounded ${p === page ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-800 hover:bg-slate-200'}`}
+              >
+                {p}
+              </button>
+            ) : (
+              <span key={idx} className="px-2 text-slate-500">{p}</span>
+            )
+          ))}
+          <button
+            type="button"
+            onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+            disabled={page >= totalPages}
+            className="px-2 py-1 rounded bg-slate-200 text-slate-800 disabled:opacity-50"
+          >
+            Siguiente
+          </button>
+        </div>
+        <div className="text-xs text-slate-600">
+          Mostrando {pageStart + 1}–{pageEnd} de {items.length} · Página {page}/{totalPages}
+        </div>
+      </div>
+    )
+  }
+
+  // Control compacto preguntas/CTA
+  const handleNChange = (v: number) => setN(clamp(v, MIN_Q, MAX_Q))
+  const dec = () => handleNChange((Number(n) || MIN_Q) - 1)
+  const inc = () => handleNChange((Number(n) || MIN_Q) + 1)
+  const handleGenerate = async () => {
+    if (!blocks?.length) return
+    await onGenerate()
+    listRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
 
   // Subir PDF -> /api/upload
   const onUpload = async () => {
@@ -195,84 +266,92 @@ export default function GeneratePage() {
   }
 
   return (
-    <div className="mx-auto max-w-4xl p-4 space-y-6">
-      <h1 className="text-xl font-semibold">Generar preguntas desde PDF</h1>
-
-      {/* Subida de PDF con drag&drop y opciones avanzadas */}
-      <div className="rounded-2xl border border-slate-200 p-4 bg-white space-y-3">
-        <div className="font-medium">1) Carga el PDF de la ley/norma</div>
-        <DragDropUpload
-          current={pdfFile}
-          onSelect={(f) => {
-            setPdfFile(f)
-            if (f && !userEditedLawName && !lawName.trim()) {
-              setLawName(baseNameFromFile(f))
-            }
-          }}
-        />
-        <button
-          type="button"
-          onClick={onUpload}
-          disabled={uploading || !pdfFile || overlapInvalid}
-          className="px-3 py-2 rounded-xl bg-slate-900 text-white text-sm disabled:opacity-50"
-        >
-          {uploading ? 'Subiendo…' : 'Subir y detectar bloques'}
-        </button>
-        <div className="text-sm text-slate-700" aria-live="polite">
-          {pagesCount !== null ? (
-            <>Páginas: {pagesCount} · Bloques: {blocks.length} (blockSize {blockSize}, overlap {overlap})</>
-          ) : (
-            'Sin datos aún.'
-          )}
-        </div>
-        {!!uploadError && <div className="text-sm text-red-600">{uploadError}</div>}
-
-        {/* Opciones avanzadas */}
-        <button type="button" onClick={() => setShowAdvanced((v) => !v)} className="text-sm underline">
-          {showAdvanced ? 'Ocultar' : 'Mostrar'} opciones avanzadas
-        </button>
-        {showAdvanced && (
-          <div className="grid gap-3 md:grid-cols-2">
-            <label className="text-sm">
-              <div className="mb-1 text-slate-600">blockSize (páginas por bloque)</div>
-              <input
-                type="number"
-                min={1}
-                value={blockSize}
-                onChange={(e) => setBlockSize(Math.max(1, Number(e.target.value) || 1))}
-                className="w-full rounded-lg border border-slate-300 p-2"
+    <div className="min-h-screen bg-white">
+      <section className="sticky top-0 z-30 bg-white/85 backdrop-blur supports-[backdrop-filter]:bg-white/60 border-b">
+        <div className="mx-auto max-w-5xl px-3 py-2">
+          <div className="grid grid-cols-1 md:grid-cols-12 gap-2 items-start">
+            <div className="md:col-span-6 self-start">
+              <DragDropUpload
+                current={pdfFile}
+                onSelect={(f) => {
+                  setPdfFile(f)
+                  if (f && !userEditedLawName && !lawName.trim()) setLawName(f.name.replace(/\.[^.]+$/, ''))
+                }}
               />
-              <div className="text-xs text-slate-500">Recomendado 4–6</div>
-            </label>
-            <label className="text-sm">
-              <div className="mb-1 text-slate-600">overlap (0..blockSize-1)</div>
-              <input
-                type="number"
-                min={0}
-                max={blockSize - 1}
-                value={overlap}
-                onChange={(e) => setOverlap(Number(e.target.value) || 0)}
-                className={`w-full rounded-lg border p-2 ${overlapInvalid ? 'border-red-500' : 'border-slate-300'}`}
-              />
-              <div className={`text-xs ${overlapInvalid ? 'text-red-600' : 'text-slate-500'}`}>
-                {overlapInvalid ? `Valor inválido. Máx: ${overlapMax}` : 'Solape recomendado: 1'}
+              <button
+                type="button"
+                onClick={onUpload}
+                disabled={uploading || !pdfFile || overlapInvalid}
+                className="mt-2 h-9 px-3 rounded-lg bg-slate-900 text-white text-sm disabled:opacity-50"
+              >
+                {uploading ? 'Subiendo…' : 'Subir y detectar bloques'}
+              </button>
+            </div>
+            <div className="md:col-span-6 md:col-start-7 self-start">
+              <div className="rounded-2xl border border-slate-300 bg-white p-4 min-h-28 flex flex-col justify-center">
+                <div className="flex flex-col">
+                <label className="text-xs font-medium text-slate-700 mb-1">Preguntas</label>
+                <form
+                  onSubmit={(e) => { e.preventDefault(); handleGenerate() }}
+                  className="flex items-stretch gap-1"
+                  aria-label="Control de número de preguntas"
+                >
+                  <button
+                    type="button"
+                    onClick={dec}
+                    disabled={n <= MIN_Q}
+                    className="h-9 w-9 rounded-lg border border-slate-300 text-sm disabled:opacity-40"
+                    aria-label="Disminuir número de preguntas"
+                    title="Disminuir"
+                  >
+                    –
+                  </button>
+                  <input
+                    type="number"
+                    min={MIN_Q}
+                    max={MAX_Q}
+                    value={n}
+                    onChange={(e) => handleNChange(Number(e.target.value) || MIN_Q)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleGenerate() } }}
+                    className="h-9 w-16 text-center rounded-lg border border-slate-300 px-2 text-sm font-medium leading-tight"
+                    aria-label="Número de preguntas"
+                    title={`Número de preguntas (entre ${MIN_Q} y ${MAX_Q})`}
+                  />
+                  <button
+                    type="button"
+                    onClick={inc}
+                    disabled={n >= MAX_Q}
+                    className="h-9 w-9 rounded-lg border border-slate-300 text-sm disabled:opacity-40"
+                    aria-label="Aumentar número de preguntas"
+                    title="Aumentar"
+                  >
+                    +
+                  </button>
+                  <button
+                    type="submit"
+                    onClick={(e) => { e.preventDefault(); handleGenerate() }}
+                    className={`h-9 px-3 rounded-lg ${generating ? 'bg-slate-400' : 'bg-emerald-600 hover:bg-emerald-700'} text-white text-sm font-semibold disabled:opacity-50`}
+                    disabled={!blocks?.length || generating}
+                    aria-label={`Generar ${n} preguntas`}
+                    title={`Generar ${n} preguntas`}
+                  >
+                    {generating ? 'Generando' : 'Generar preguntas'}
+                  </button>
+                </form>
+                <span className="mt-1 text-[11px] text-slate-500">Rango {MIN_Q}–{MAX_Q}</span>
+                </div>
               </div>
-            </label>
+            </div>
           </div>
-        )}
+        </div>
+      </section>
 
-        {/* Chips y modal */}
-        <BlocksChips blocks={blocks as any} onViewAll={() => setShowBlocksModal(true)} viewAllRef={viewAllBtnRef} />
-      </div>
-
-      {/* Identificación del cuestionario */}
-      <div className="rounded-2xl border border-slate-200 p-4 bg-white space-y-3">
-        <div className="font-medium">2) Identificación del cuestionario</div>
-        <div className="flex items-center justify-between gap-3">
-          <div className="flex-1">
-            {!lockedMode ? (
-              <label className="text-sm block">
-                <div className="mb-1 text-slate-600">Nombre de la ley/norma</div>
+      <section className="mx-auto max-w-5xl px-3 py-3">
+        <div className="rounded-xl border border-slate-200 bg-white p-3 text-sm">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <span className="text-slate-600">Ley/norma:</span>
+              {!lockedMode ? (
                 <input
                   type="text"
                   value={lawName}
@@ -280,161 +359,137 @@ export default function GeneratePage() {
                     setLawName(e.target.value)
                     setUserEditedLawName(true)
                   }}
-                  className="w-full rounded-lg border border-slate-300 p-2"
-                  placeholder="p. ej., Constitución Española (consolidado)"
+                  className="rounded-lg border border-slate-300 px-2 py-1 text-sm"
                 />
-                <div className="text-xs text-slate-500">Origen: meta Title del PDF o nombre de archivo</div>
-              </label>
-            ) : (
-              <div className="text-sm">
-                <div className="text-slate-600 mb-1">Nombre de la ley/norma</div>
-                <div className="flex items-center gap-2">
-                  <div className="px-2 py-1 rounded-lg border border-slate-200 bg-slate-50 text-slate-800">{lawName || '—'}</div>
-                  <button type="button" onClick={() => setLockedMode(false)} className="px-2 py-1 rounded-lg bg-slate-200 text-slate-800 text-sm">✎ Editar</button>
-                </div>
-                <div className="text-xs text-slate-500">Modo bloqueado (vista limpia)</div>
-              </div>
+              ) : (
+                <span className="px-2 py-1 rounded-lg border border-slate-200 bg-slate-50">{lawName || '—'}</span>
+              )}
+              <button type="button" onClick={() => setLockedMode((v) => !v)} className="text-xs underline">
+                {lockedMode ? 'Editar' : 'Bloquear'}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const auto = deriveLawName(lastMetaInfo, pdfFile)
+                  if (auto) {
+                    setLawName(auto)
+                    setUserEditedLawName(false)
+                  }
+                }}
+                className="text-xs text-slate-700"
+              >
+                ↺ Restablecer
+              </button>
+            </div>
+            <div className="text-slate-600" aria-live="polite">
+              Páginas: {pagesCount ?? '—'} · Bloques: {blocks.length} (blockSize {blockSize}, overlap {overlap})
+            </div>
+          </div>
+          <div className="mt-2 overflow-x-auto">
+            <div className="flex items-center gap-2 min-w-max">
+              {blocks.map((b: any) => (
+                <button
+                  key={b.index}
+                  title={`p.${b.startPage}–${b.endPage}`}
+                  className="shrink-0 inline-flex items-center rounded-lg border border-slate-300 px-2 py-0.5 text-xs hover:bg-slate-50"
+                >
+                  [{b.index}] p.{b.startPage}–{b.endPage}
+                </button>
+              ))}
+              <button onClick={() => setShowBlocksModal(true)} className="shrink-0 underline text-xs">
+                Ver todos
+              </button>
+            </div>
+          </div>
+          {!!uploadError && <div className="mt-2 text-xs text-red-600">{uploadError}</div>}
+        </div>
+      </section>
+
+      <section ref={listRef} className="mx-auto max-w-5xl px-3 py-3">
+        <div className="rounded-2xl border border-slate-200 p-3 bg-white">
+          <div className="flex items-center justify-between">
+            <div className="font-medium text-sm">Preguntas</div>
+            <div className="text-sm text-slate-600">Sin responder (página): {unansweredVisible} / {pageItems.length}</div>
+          </div>
+          <div className="flex flex-wrap items-center gap-3 py-2">
+            <button
+              type="button"
+              onClick={correctAll}
+              disabled={items.length === 0}
+              className="px-3 py-2 rounded-xl bg-indigo-600 text-white text-xs md:text-sm disabled:opacity-50"
+            >
+              Corregir todo
+            </button>
+            <label className="flex items-center gap-2 text-xs md:text-sm">
+              <input type="checkbox" checked={includeCorrect} onChange={(e) => setIncludeCorrect(e.target.checked)} />
+              Incluir columna “correcta” en la exportación
+            </label>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => exportItems('json')}
+                disabled={items.length === 0}
+                className="px-3 py-2 rounded-xl bg-slate-800 text-white text-xs md:text-sm disabled:opacity-50"
+              >
+                Exportar JSON
+              </button>
+              <button
+                type="button"
+                onClick={() => exportItems('csv')}
+                disabled={items.length === 0}
+                className="px-3 py-2 rounded-xl bg-slate-700 text-white text-xs md:text-sm disabled:opacity-50"
+              >
+                Exportar CSV
+              </button>
+              <button
+                type="button"
+                onClick={() => exportItems('pdf')}
+                disabled={items.length === 0}
+                className="px-3 py-2 rounded-xl bg-slate-600 text-white text-xs md:text-sm disabled:opacity-50"
+              >
+                Exportar PDF
+              </button>
+            </div>
+          </div>
+
+          <Paginator />
+          <div className="grid gap-3">
+            {pageItems.map((it, i) => {
+              const gi = pageStart + i
+              return (
+                <MCQCard
+                  key={gi}
+                  index={gi}
+                  item={it}
+                  userAnswer={answers[gi] ?? null}
+                  onChange={(_, value) => setAnswers((prev) => ({ ...prev, [gi]: value }))}
+                  onCorrectOne={(idx) => {
+                    const a = answers[idx]
+                    if (!items[idx]) return
+                    const ok = a === items[idx].correcta
+                    setCorrected((prev) => ({ ...prev, [idx]: true }))
+                    setResults((prev) => ({ ...prev, [idx]: { isCorrect: !!ok } }))
+                  }}
+                  corrected={!!corrected[gi]}
+                  result={results[gi]}
+                />
+              )
+            })}
+            {items.length === 0 && (
+              <div className="text-slate-600 text-sm">Carga un PDF y genera preguntas para empezar.</div>
             )}
           </div>
-          <div className="shrink-0 flex flex-col items-end gap-2">
-            <button
-              type="button"
-              onClick={() => {
-                const auto = deriveLawName(lastMetaInfo, pdfFile)
-                if (auto) {
-                  setLawName(auto)
-                  setUserEditedLawName(false)
-                }
-              }}
-              className="px-2 py-1 rounded-lg bg-slate-100 text-slate-700 text-xs"
-            >
-              ↺ Restablecer
-            </button>
-            <label className="text-xs flex items-center gap-2">
-              <input type="checkbox" checked={lockedMode} onChange={(e) => setLockedMode(e.target.checked)} />
-              Bloquear nombre (vista limpia)
-            </label>
-          </div>
-        </div>
-      </div>
+          <Paginator />
 
-      {/* Parámetros de generación */}
-      <div className="rounded-2xl border border-slate-200 p-4 bg-white space-y-3">
-        <div className="font-medium">3) Parámetros</div>
-        <div className="grid gap-3 md:grid-cols-2">
-          <label className="text-sm">
-            <div className="mb-1 text-slate-600">Número de preguntas (1–20)</div>
-            <input
-              type="number"
-              min={1}
-              max={20}
-              value={n}
-              onChange={(e) => setN(Number(e.target.value))}
-              className="w-full rounded-lg border border-slate-300 p-2"
-            />
-          </label>
-        </div>
-        <div className="flex gap-2">
-          <button
-            type="button"
-            onClick={onGenerate}
-            disabled={generating || blocks.length === 0 || !lawName.trim()}
-            className="px-3 py-2 rounded-xl bg-emerald-600 text-white text-sm disabled:opacity-50"
-          >
-            {generating ? 'Generando…' : 'Generar preguntas'}
-          </button>
-        </div>
-        {!!genError && <div className="text-sm text-red-600">{genError}</div>}
-      </div>
-
-      {/* Preguntas + corrección */}
-      <div className="rounded-2xl border border-slate-200 p-4 bg-white space-y-4">
-        <div className="flex items-center justify-between">
-          <div className="font-medium">4) Preguntas</div>
-          <div className="text-sm text-slate-600">Sin responder (página): {unansweredVisible} / {pageItems.length}</div>
-        </div>
-        <div className="flex flex-wrap items-center gap-4">
-          <button
-            type="button"
-            onClick={correctAll}
-            disabled={items.length === 0}
-            className="px-3 py-2 rounded-xl bg-indigo-600 text-white text-sm disabled:opacity-50"
-          >
-            Corregir todo
-          </button>
-          <label className="flex items-center gap-2 text-sm">
-            <input type="checkbox" checked={includeCorrect} onChange={(e) => setIncludeCorrect(e.target.checked)} />
-            Incluir columna “correcta” en la exportación
-          </label>
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => exportItems('json')}
-              disabled={items.length === 0}
-              className="px-3 py-2 rounded-xl bg-slate-800 text-white text-sm disabled:opacity-50"
-            >
-              Exportar JSON
-            </button>
-            <button
-              type="button"
-              onClick={() => exportItems('csv')}
-              disabled={items.length === 0}
-              className="px-3 py-2 rounded-xl bg-slate-700 text-white text-sm disabled:opacity-50"
-            >
-              Exportar CSV
-            </button>
-            <button
-              type="button"
-              onClick={() => exportItems('pdf')}
-              disabled={items.length === 0}
-              className="px-3 py-2 rounded-xl bg-slate-600 text-white text-sm disabled:opacity-50"
-            >
-              Exportar PDF
-            </button>
-          </div>
-        </div>
-        <div className="grid gap-4">
-          {pageItems.map((it, i) => {
-            const gi = pageStart + i
-            return (
-              <MCQCard
-                key={gi}
-                index={gi}
-                item={it}
-                userAnswer={answers[gi] ?? null}
-                onChange={(_, value) => setAnswers((prev) => ({ ...prev, [gi]: value }))}
-                onCorrectOne={(idx) => {
-                  const a = answers[idx]
-                  if (!items[idx]) return
-                  const ok = a === items[idx].correcta
-                  setCorrected((prev) => ({ ...prev, [idx]: true }))
-                  setResults((prev) => ({ ...prev, [idx]: { isCorrect: !!ok } }))
-                }}
-                corrected={!!corrected[gi]}
-                result={results[gi]}
-              />
-            )
-          })}
-          {items.length === 0 && (
-            <div className="text-slate-600 text-sm">Carga un PDF y genera preguntas para empezar.</div>
+          {score !== null && (
+            <div className="mt-3 rounded-xl bg-slate-50 border border-slate-200 p-3 text-sm">
+              <div className="font-semibold">Puntuación</div>
+              Has acertado {score} de {items.length} preguntas.
+            </div>
           )}
         </div>
-        <div className="flex items-center justify-between pt-2">
-          <div className="text-sm text-slate-600">
-            Mostrando {pageStart + 1}–{pageEnd} de {items.length} · Página {page} / {totalPages}
-          </div>
-          <div className="flex gap-2">
-            <button type="button" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page <= 1} className="px-3 py-2 rounded-xl bg-slate-200 text-slate-800 text-sm disabled:opacity-50">Anterior</button>
-            <button type="button" onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={page >= totalPages} className="px-3 py-2 rounded-xl bg-slate-900 text-white text-sm disabled:opacity-50">Siguiente</button>
-          </div>
-        </div>
-        {score !== null && (
-          <div className="rounded-xl bg-slate-50 border border-slate-200 p-3 text-sm">
-            <div className="font-semibold">Puntuación</div>
-            Has acertado {score} de {items.length} preguntas.
-          </div>
-        )}
-      </div>
+      </section>
+
       <Modal open={showBlocksModal} onClose={() => setShowBlocksModal(false)} title="Bloques detectados">
         <div className="grid grid-cols-2 gap-2">
           {blocks.map((b: any) => (
