@@ -27,13 +27,13 @@ export default function MCQCard({
   const border = corrected ? (result?.isCorrect ? 'border-green-500' : 'border-red-500') : 'border-slate-200'
 
   return (
-    <div className={'rounded-2xl border ' + border + ' p-4 shadow-sm bg-white'}>
-      <div className="mb-2 text-slate-800 font-medium">
+    <div className={'rounded-2xl border ' + border + ' p-3 shadow-sm bg-white text-sm'}>
+      <div className="mb-1.5 text-slate-800 font-medium">
         <span className="text-slate-500 mr-2">Q{index + 1}.</span>
         {item.pregunta}
       </div>
 
-      <div className="space-y-2">
+      <div className="space-y-1.5">
         {letterKeys.map((k) => {
           const id = baseId + '-' + index + '-' + k
           const selected = userAnswer === k
@@ -49,7 +49,7 @@ export default function MCQCard({
             <label
               key={k}
               htmlFor={id}
-              className={'flex items-start gap-3 rounded-xl border ' + optionStyle + ' p-3 cursor-pointer'}
+              className={'flex items-start gap-3 rounded-xl border ' + optionStyle + ' p-2.5 cursor-pointer'}
             >
               <input
                 id={id}
@@ -61,18 +61,18 @@ export default function MCQCard({
               />
               <div>
                 <div className="font-semibold">{k}</div>
-                <div className="text-sm text-slate-700">{item.opciones[k]}</div>
+                <div className="text-slate-700">{item.opciones[k]}</div>
               </div>
             </label>
           )
         })}
       </div>
 
-      <div className="mt-3 flex gap-2">
+      <div className="mt-2.5 flex gap-2">
         <button
           type="button"
           onClick={() => onCorrectOne(index)}
-          className="px-3 py-2 rounded-xl bg-slate-900 text-white text-sm"
+          className="px-3 py-1.5 rounded-xl bg-slate-900 text-white text-xs md:text-sm"
         >
           Corregir esta
         </button>
