@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { parsePdf } from 'lib/pdf/parsePdf'
 import { splitIntoBlocks } from 'lib/pdf/splitIntoBlocks'
+import crypto from 'node:crypto'
 
 export const runtime = 'nodejs'
 
@@ -14,6 +15,7 @@ export async function POST(req: Request) {
 
     const arrayBuffer = await file.arrayBuffer()
     const buffer = Buffer.from(arrayBuffer)
+    const fileHash = crypto.createHash('sha1').update(buffer).digest('hex')
 
     const blockSizeRaw = form.get('blockSize')
     const overlapRaw = form.get('overlap')
@@ -23,11 +25,22 @@ export async function POST(req: Request) {
     const { pages, numPages, info } = await parsePdf(buffer)
     const blocks = splitIntoBlocks(pages, blockSize, overlap)
 
+    function normalizePageText(s: string) {
+      return (s || '')
+        .replace(/\f/g, '\n')
+        .replace(/^\s*\d+\s*$/gm, '')
+        .replace(/[·•◦]\s*/g, '• ')
+        .replace(/[ \t]+/g, ' ')
+        .trim()
+    }
+    const pagesFull = pages.map((t, i) => ({ num: i + 1, text: normalizePageText(t).slice(0, 20000) }))
+
     // Compat: expone pages (número) además de meta.numPages para clientes existentes
     return NextResponse.json({
       blocks,
       pages: numPages,
-      meta: { numPages, info, blockSize, overlap },
+      pagesFull,
+      meta: { numPages, info, blockSize, overlap, fileHash },
     })
   } catch (err) {
     console.error(err)

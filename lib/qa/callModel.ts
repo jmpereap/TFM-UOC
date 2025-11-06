@@ -112,4 +112,29 @@ export async function callModel(prompt: string, timeoutMs = 20000): Promise<MCQI
   }
 }
 
+export async function callModelJSON(prompt: string, timeoutMs = 20000, maxTokens = 500): Promise<any> {
+  const ctrl = new AbortController()
+  const to = setTimeout(() => ctrl.abort(), timeoutMs)
+  try {
+    const res = await client.chat.completions.create(
+      {
+        model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
+        messages: [
+          { role: 'system', content: 'Responde SOLO con un objeto JSON válido.' },
+          { role: 'user', content: prompt },
+        ],
+        temperature: 0,
+        top_p: 1,
+        max_tokens: maxTokens,
+        response_format: { type: 'json_object' } as any,
+      },
+      { signal: ctrl.signal } as any,
+    )
+    const txt = res.choices[0]?.message?.content || '{}'
+    return JSON.parse(txt)
+  } finally {
+    clearTimeout(to)
+  }
+}
+
 

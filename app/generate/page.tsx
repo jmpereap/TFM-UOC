@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { MCQItem, OptionKey } from '@/types/mcq'
+import type { Outline, OutlineNode } from '@/types/outline'
 import MCQCard from '@/components/MCQCard'
 import DragDropUpload from '@/components/DragDropUpload'
 import Modal from '@/components/Modal'
@@ -30,6 +31,8 @@ export default function GeneratePage() {
   // PDF/bloques
   const [pdfFile, setPdfFile] = useState<File | null>(null)
   const [blocks, setBlocks] = useState<any[]>([])
+  const [pagesFull, setPagesFull] = useState<any[]>([])
+  const [fileHash, setFileHash] = useState<string | null>(null)
   const [pagesCount, setPagesCount] = useState<number | null>(null)
   const [uploading, setUploading] = useState(false)
   const [uploadError, setUploadError] = useState<string | null>(null)
@@ -55,6 +58,14 @@ export default function GeneratePage() {
   const [generating, setGenerating] = useState(false)
   const [genError, setGenError] = useState<string | null>(null)
   const [includeCorrect, setIncludeCorrect] = useLocalStorage<boolean>('tfm.includeCorrect', true)
+  const [sumMode, setSumMode] = useState<'ejecutivo' | 'estructurado'>('estructurado')
+  const [sumLen, setSumLen] = useState<'corto' | 'medio' | 'largo'>('medio')
+  const [summaryMode, setSummaryMode] = useState<'rapido' | 'exhaustivo'>('exhaustivo')
+  const [summary, setSummary] = useState<any | null>(null)
+  const [summLoading, setSummLoading] = useState(false)
+  const [outline, setOutline] = useState<Outline | null>(null)
+  const [outlineLoading, setOutlineLoading] = useState(false)
+  const [outlineError, setOutlineError] = useState<string | null>(null)
 
   // Paginación
   const PAGE_SIZE = 5
@@ -166,7 +177,10 @@ export default function GeneratePage() {
       const data = await res.json()
       setPagesCount(typeof data?.pages === 'number' ? data.pages : data?.meta?.numPages ?? null)
       setBlocks(data.blocks || [])
+      setPagesFull(data.pagesFull || [])
+      setFileHash(data?.meta?.fileHash || null)
       setLastMetaInfo(data?.meta?.info || null)
+      setOutline(null)
       if (!userEditedLawName) {
         const auto = deriveLawName(data?.meta?.info, pdfFile)
         if (auto) setLawName(auto)
@@ -263,6 +277,108 @@ export default function GeneratePage() {
     a.click()
     a.remove()
     URL.revokeObjectURL(url)
+  }
+
+  async function onSummarize() {
+    if (!blocks?.length) return
+    setSummLoading(true)
+    try {
+      const res = await fetch('/api/summarize', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ lawName, fileHash, pagesFull, blocks, mode: sumMode, length: sumLen, summaryMode }),
+      })
+      const txt = await res.text()
+      let data: any = null
+      try {
+        data = JSON.parse(txt)
+      } catch {
+        const s = txt.indexOf('{')
+        const e = txt.lastIndexOf('}')
+        if (s >= 0 && e > s) {
+          try { data = JSON.parse(txt.slice(s, e + 1)) } catch {}
+        }
+      }
+      if (!data) throw new Error('Respuesta no JSON del servidor')
+      if (!res.ok) throw new Error(data?.error || 'Error')
+      setSummary(data.summary)
+    } catch (e: any) {
+      alert('Error al resumir: ' + e.message)
+    } finally {
+      setSummLoading(false)
+    }
+  }
+
+  async function onGenerateOutline() {
+    if (!pagesFull.length && !blocks.length) return
+    setOutlineLoading(true)
+    setOutlineError(null)
+    try {
+      const res = await fetch('/api/outline', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ lawName, pagesFull, blocks }),
+      })
+      const txt = await res.text()
+      let data: any = null
+      try {
+        data = JSON.parse(txt)
+      } catch {
+        const s = txt.indexOf('{')
+        const e = txt.lastIndexOf('}')
+        if (s >= 0 && e > s) {
+          try { data = JSON.parse(txt.slice(s, e + 1)) } catch {}
+        }
+      }
+      if (!data) throw new Error('Respuesta no JSON del servidor')
+      if (!data.ok) throw new Error(data.error || 'Error generando esquema')
+      console.debug('[outline]', data)
+      setOutline(data.outline || null)
+    } catch (e: any) {
+      setOutline(null)
+      setOutlineError(e.message || 'Error generando esquema')
+    } finally {
+      setOutlineLoading(false)
+    }
+  }
+
+  const outlineMermaid = useMemo(() => {
+    if (!outline) return ''
+    function walk(node: OutlineNode, depth: number): string {
+      const indent = '  '.repeat(depth)
+      const extras = [node.label]
+      if (node.pages) extras.push(`(${node.pages})`)
+      const label = extras.join(' ').replace(/"/g, '\\"')
+      let out = `${indent}${label}\n`
+      if (node.children) {
+        for (const child of node.children) out += walk(child, depth + 1)
+      }
+      return out
+    }
+    return `mindmap\n${walk(outline.root, 1)}`
+  }, [outline])
+
+  function OutlineTree({ node }: { node: OutlineNode }) {
+    const hasChildren = Array.isArray(node.children) && node.children.length > 0
+    const labelParts = [node.label]
+    if (node.pages) labelParts.push(`(${node.pages})`)
+    if (node.articulos?.length) labelParts.push(`Art.: ${node.articulos.join(', ')}`)
+    const label = labelParts.join(' ')
+    if (!hasChildren) {
+      return <li className="text-sm text-slate-700 whitespace-normal break-words ml-4">{label}</li>
+    }
+    return (
+      <li className="text-sm text-slate-700 whitespace-normal break-words">
+        <details open className="ml-2">
+          <summary className="cursor-pointer font-medium text-slate-800 whitespace-normal break-words leading-snug">{label}</summary>
+          <ul className="ml-4 border-l border-slate-200 pl-3 space-y-1">
+            {node.children!.map((child) => (
+              <OutlineTree key={child.id} node={child} />
+            ))}
+          </ul>
+        </details>
+      </li>
+    )
   }
 
   return (
@@ -405,6 +521,42 @@ export default function GeneratePage() {
         </div>
       </section>
 
+      {/* Controles de resumen */}
+      <section className="mx-auto max-w-5xl px-3 py-3">
+        <div className="rounded-xl border border-slate-200 bg-white p-3 text-sm">
+          <div className="flex flex-wrap items-end gap-2">
+            <label className="text-xs">Tipo
+              <select value={sumMode} onChange={(e) => setSumMode(e.target.value as any)} className="ml-2 rounded-lg border border-slate-300 p-1 text-sm">
+                <option value="ejecutivo">Ejecutivo</option>
+                <option value="estructurado">Estructurado</option>
+              </select>
+            </label>
+            <label className="text-xs">Longitud
+              <select value={sumLen} onChange={(e) => setSumLen(e.target.value as any)} className="ml-2 rounded-lg border border-slate-300 p-1 text-sm">
+                <option value="corto">Corto</option>
+                <option value="medio">Medio</option>
+                <option value="largo">Largo</option>
+              </select>
+            </label>
+            <label className="text-xs">Modo resumen
+              <select value={summaryMode} onChange={(e) => setSummaryMode(e.target.value as any)} className="ml-2 rounded-lg border border-slate-300 p-1 text-sm">
+                <option value="rapido">Rápido (menos detalle)</option>
+                <option value="exhaustivo">Exhaustivo jurídico</option>
+              </select>
+            </label>
+            <button onClick={onSummarize} disabled={!blocks.length || summLoading} className="ml-auto h-9 px-3 rounded-lg bg-indigo-600 text-white text-sm disabled:opacity-50">
+              {summLoading ? 'Resumiendo…' : 'Generar resumen'}
+            </button>
+          </div>
+          {summary && (
+            <div className="mt-3 grid gap-2">
+              <div className="font-medium">Resumen ({summary.tipo})</div>
+              <pre className="text-xs whitespace-pre-wrap bg-slate-50 p-2 rounded-lg border border-slate-200">{JSON.stringify(summary, null, 2)}</pre>
+            </div>
+          )}
+        </div>
+      </section>
+
       <section ref={listRef} className="mx-auto max-w-5xl px-3 py-3">
         <div className="rounded-2xl border border-slate-200 p-3 bg-white">
           <div className="flex items-center justify-between">
@@ -497,6 +649,55 @@ export default function GeneratePage() {
           ))}
         </div>
       </Modal>
+
+      {/* Outline / mapa mental */}
+      <section className="mx-auto max-w-5xl px-3 pb-6">
+        <div className="rounded-xl border border-slate-200 bg-white p-3 text-sm space-y-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="font-medium text-sm">Esquema / mapa mental</div>
+            <button
+              type="button"
+              onClick={onGenerateOutline}
+              disabled={outlineLoading || (!pagesFull.length && !blocks.length)}
+              className="ml-auto h-9 px-3 rounded-lg bg-sky-600 text-white text-sm disabled:opacity-50"
+            >
+              {outlineLoading ? 'Generando…' : 'Generar esquema'}
+            </button>
+          </div>
+          {outlineError && <div className="text-xs text-red-600">{outlineError}</div>}
+          {outline && (
+            <div className="space-y-2">
+              <div className="flex gap-2 text-xs">
+                <button
+                  type="button"
+                  onClick={() => navigator.clipboard.writeText(JSON.stringify(outline, null, 2))}
+                  className="px-2 py-1 rounded border border-slate-300"
+                >
+                  Copiar JSON
+                </button>
+                <button
+                  type="button"
+                  onClick={() => navigator.clipboard.writeText(outlineMermaid)}
+                  className="px-2 py-1 rounded border border-slate-300"
+                >
+                  Copiar Mermaid
+                </button>
+              </div>
+              <div className="max-h-[70vh] overflow-y-auto pr-2">
+                <div className="text-sm font-semibold text-slate-800 mb-1">{outline.root.label}</div>
+                <ul className="space-y-1">
+                  {outline.root.children?.map((child) => (
+                    <OutlineTree key={child.id} node={child} />
+                  ))}
+                </ul>
+              </div>
+            </div>
+          )}
+          {!outline && !outlineLoading && !outlineError && (
+            <div className="text-xs text-slate-500">Genera un esquema para visualizar la ley como mapa mental.</div>
+          )}
+        </div>
+      </section>
     </div>
   )
 }

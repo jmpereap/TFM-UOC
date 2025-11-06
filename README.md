@@ -47,6 +47,13 @@ docs/                # documentación y plantillas
 - El endpoint `/api/generate` devuelve preguntas mock (sin LLM) para probar el flujo.
 - El `scripts/export-prompts-to-docx.ts` crea un DOCX de ejemplo en `docs/prompts/validated/`.
 
+### Resumen legal (rendimiento)
+
+- Env: `SUMMARY_CONCURRENCY=6`, `SUMMARY_MAP_TIMEOUT_MS=25000`, `SUMMARY_GROUP_SIZE=6`.
+- Truncado legal-aware por bloque (~2.8k chars).
+- Prompt MAP ligero con `response_format: json_object` y `max_tokens` acotado.
+- Reduce en 2 niveles para documentos medianos.
+
 ## Pendiente / Extensiones
 - Integración de modelo (LLM) real en `api/generate`.
 - Ajustes de `splitIntoBlocks` según heurísticas específicas.
