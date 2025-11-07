@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { MCQItem, OptionKey } from '@/types/mcq'
-import type { Outline, OutlineNode } from '@/types/outline'
+import type { MentalOutline, DisposicionItem } from '@/types/mentalOutline'
 import MCQCard from '@/components/MCQCard'
 import DragDropUpload from '@/components/DragDropUpload'
 import Modal from '@/components/Modal'
@@ -26,12 +26,296 @@ function deriveLawName(metaInfo: any, file?: File | null) {
 const clamp = (v: number, min: number, max: number) => Math.min(max, Math.max(min, v))
 const MIN_Q = 1
 const MAX_Q = 20
+const MENTAL_OUTLINE_CHUNK_SIZES = [3, 2, 1] as const
+
+type OutlineProgress = {
+  processed: number
+  total: number
+  lastChunk: number
+}
+
+function formatPages(pages?: number[] | null) {
+  if (!pages || pages.length === 0) return ''
+  if (pages.length === 1) return `p. ${pages[0]}`
+  return `p. ${pages[0]}–${pages[pages.length - 1]}`
+}
+
+const ORDINAL_REGEX = {
+  titulo: /T[ÍI]TULO\s+(PRELIMINAR|[IVXLCDM]+|\d+)/i,
+  capitulo: /CAP[ÍI]TULO\s+(PRELIMINAR|[IVXLCDM]+|\d+)/i,
+  seccion: /SECCI[ÓO]N\s+([IVXLCDM]+|\d+)/i,
+} as const
+
+const LABELS = {
+  titulo: 'TÍTULO',
+  capitulo: 'CAPÍTULO',
+  seccion: 'SECCIÓN',
+} as const
+
+const DISPOSITION_PREFIX: Record<'adicionales' | 'transitorias' | 'derogatorias' | 'finales', string> = {
+  adicionales: 'Adicional',
+  transitorias: 'Transitoria',
+  derogatorias: 'Derogatoria',
+  finales: 'Final',
+}
+
+const ARTICLE_NUMBER_REGEX = /Artículo\s+([\wºª\.]+(?:\s+(?:bis|ter|quater|quinquies))?)/i
+const DISPOSITION_REGEX = /Disposición\s+(Adicional|Transitoria|Derogatoria|Final)\s+([\wáéíóúüñºª]+)?/i
+
+function toRoman(value: number) {
+  if (value <= 0) return String(value)
+  const numerals: [number, string][] = [
+    [1000, 'M'],
+    [900, 'CM'],
+    [500, 'D'],
+    [400, 'CD'],
+    [100, 'C'],
+    [90, 'XC'],
+    [50, 'L'],
+    [40, 'XL'],
+    [10, 'X'],
+    [9, 'IX'],
+    [5, 'V'],
+    [4, 'IV'],
+    [1, 'I'],
+  ]
+  let remaining = Math.floor(value)
+  let result = ''
+  for (const [num, roman] of numerals) {
+    while (remaining >= num) {
+      result += roman
+      remaining -= num
+    }
+  }
+  return result || String(value)
+}
+
+function extractOrdinalFromText(kind: keyof typeof ORDINAL_REGEX, text?: string | null) {
+  if (!text) return ''
+  const match = text.match(ORDINAL_REGEX[kind])
+  if (!match) return ''
+  return (match[1] || '').toUpperCase()
+}
+
+function resolveOrdinal(kind: keyof typeof ORDINAL_REGEX, raw: string | undefined | null, text: string | undefined | null, index: number) {
+  const cleaned = raw?.replace(/\?/g, '').trim()
+  if (cleaned) return cleaned
+  const fromText = extractOrdinalFromText(kind, text)
+  if (fromText) return fromText
+  if (kind === 'titulo' || kind === 'capitulo' || kind === 'seccion') {
+    return toRoman(index + 1)
+  }
+  return String(index + 1)
+}
+
+function resolveLabel(kind: keyof typeof ORDINAL_REGEX, text: string | undefined | null, ordinal: string) {
+  const cleanedText = text?.trim()
+  if (cleanedText && !cleanedText.includes('?')) {
+    return cleanedText
+  }
+  return `${LABELS[kind]} ${ordinal}`
+}
+
+function normalizeArticleNumber(raw: string | undefined | null, text: string | undefined | null, index: number) {
+  const cleaned = raw?.replace(/\?/g, '').trim()
+  if (cleaned) return cleaned
+  if (text) {
+    const match = text.match(ARTICLE_NUMBER_REGEX)
+    if (match) return match[1].replace(/\.$/, '').trim()
+  }
+  return String(index + 1)
+}
+
+function normalizeArticleHeading(text: string | undefined | null, number: string) {
+  const cleaned = text?.trim()
+  if (cleaned && !cleaned.match(/^Artículo\s+\?$/i)) return cleaned
+  return `Artículo ${number}`
+}
+
+function normalizeDispositionNumber(item: DisposicionItem, fallbackIndex: number) {
+  const cleaned = item.numero?.replace(/\?/g, '').trim()
+  if (cleaned) return cleaned
+  const match = item.texto_encabezado?.match(DISPOSITION_REGEX)
+  if (match && match[2]) {
+    return match[2].replace(/\.$/, '').trim()
+  }
+  return String(fallbackIndex + 1)
+}
+
+function normalizeDispositionHeading(prefix: string, item: DisposicionItem, number: string) {
+  const cleaned = item.texto_encabezado?.trim()
+  if (cleaned && !cleaned.includes('?')) return cleaned
+  return `Disposición ${prefix} ${number}`
+}
+
+function OutlineTree({ outline }: { outline: MentalOutline }) {
+  const renderArticulos = (articulos: MentalOutline['titulos'][number]['articulos']) => {
+    if (!articulos?.length) return null
+    return (
+      <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+        {articulos.map((art, idx) => {
+          const number = normalizeArticleNumber(art.numero, art.articulo_texto, idx)
+          const heading = normalizeArticleHeading(art.articulo_texto, number)
+          return (
+            <div key={art.anchor || `${number}-${idx}`} className="rounded-lg border border-slate-200 bg-slate-50 p-2 text-xs shadow-sm">
+              <div className="font-semibold text-slate-700">Artículo {number}</div>
+              {heading && (
+                <div className="mt-1 text-slate-600">{heading}</div>
+              )}
+              {formatPages(art.pages) && <div className="mt-1 text-[11px] text-slate-500">{formatPages(art.pages)}</div>}
+            </div>
+          )
+        })}
+      </div>
+    )
+  }
+
+  const renderSecciones = (secciones: MentalOutline['titulos'][number]['capitulos'][number]['secciones']) => {
+    if (!secciones?.length) return null
+    return (
+      <div className="space-y-2">
+        {secciones.map((sec, secIndex) => {
+          const ordinal = resolveOrdinal('seccion', sec.ordinal, sec.seccion_texto, secIndex)
+          const label = resolveLabel('seccion', sec.seccion_texto, ordinal)
+          return (
+            <details key={sec.anchor || `${label}-${secIndex}`} open className="rounded-lg border border-slate-200 bg-white/80 p-2 pl-3 text-xs shadow-sm">
+              <summary className="flex cursor-pointer flex-wrap items-center gap-2 text-slate-700">
+                <span className="font-semibold uppercase">Sección {ordinal}</span>
+                <span className="text-slate-600">{label}</span>
+                {formatPages(sec.pages) && <span className="ml-auto text-[11px] text-slate-500">{formatPages(sec.pages)}</span>}
+              </summary>
+              <div className="mt-2 space-y-2 border-l border-slate-200 pl-3">
+                {renderArticulos(sec.articulos)}
+              </div>
+            </details>
+          )
+        })}
+      </div>
+    )
+  }
+
+  const renderCapitulos = (capitulos: MentalOutline['titulos'][number]['capitulos']) => {
+    if (!capitulos?.length) return null
+    return (
+      <div className="space-y-3">
+        {capitulos.map((cap, capIndex) => {
+          const ordinal = resolveOrdinal('capitulo', cap.ordinal, cap.capitulo_texto, capIndex)
+          const label = resolveLabel('capitulo', cap.capitulo_texto, ordinal)
+          return (
+            <details key={cap.anchor || `${label}-${capIndex}`} open className="rounded-xl border border-slate-200 bg-white p-3 text-xs shadow-sm">
+              <summary className="flex cursor-pointer flex-wrap items-center gap-2 text-slate-700">
+                <span className="font-semibold uppercase">Capítulo {ordinal}</span>
+                <span className="text-slate-600">{label}</span>
+                {formatPages(cap.pages) && <span className="ml-auto text-[11px] text-slate-500">{formatPages(cap.pages)}</span>}
+              </summary>
+              <div className="mt-3 space-y-3 border-l-2 border-slate-100 pl-4">
+                {renderSecciones(cap.secciones)}
+                {renderArticulos(cap.articulos)}
+              </div>
+            </details>
+          )
+        })}
+      </div>
+    )
+  }
+
+  const renderDisposGroup = (label: string, prefix: string, items: DisposicionItem[]) => {
+    if (!items?.length) return null
+    return (
+      <details key={label} open className="rounded-xl border border-slate-200 bg-white p-3 text-sm shadow-sm">
+        <summary className="flex cursor-pointer items-center gap-2 text-slate-700">
+          <span className="font-semibold">{label}</span>
+          <span className="rounded bg-slate-100 px-2 py-0.5 text-xs text-slate-600">{items.length}</span>
+        </summary>
+        <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+          {items.map((item, idx) => {
+            const number = normalizeDispositionNumber(item, idx)
+            const heading = normalizeDispositionHeading(prefix, item, number)
+            const showBody = heading && heading !== `Disposición ${prefix} ${number}`
+            return (
+              <div key={item.anchor || `${prefix}-${idx}`} className="rounded-lg border border-slate-200 bg-slate-50 p-2 text-xs shadow-sm">
+                <div className="font-semibold text-slate-700">
+                  Disposición {prefix} {number}
+                </div>
+                {showBody && (
+                  <div className="mt-1 text-slate-600">{heading}</div>
+                )}
+                {formatPages(item.pages) && <div className="mt-1 text-[11px] text-slate-500">{formatPages(item.pages)}</div>}
+              </div>
+            )
+          })}
+        </div>
+      </details>
+    )
+  }
+
+  const tituloCards = outline.titulos.map((titulo, index) => {
+    const ordinal = resolveOrdinal('titulo', titulo.ordinal, titulo.titulo_texto, index)
+    const label = resolveLabel('titulo', titulo.titulo_texto, ordinal)
+    return (
+      <details key={titulo.anchor || `${label}-${index}`} open className="rounded-2xl border border-slate-200 bg-white p-3 text-sm shadow-sm transition-all">
+        <summary className="flex cursor-pointer flex-wrap items-center gap-2 text-slate-800">
+          <span className="rounded-lg bg-indigo-100 px-2 py-0.5 text-xs font-semibold uppercase tracking-wide text-indigo-700">
+            Título {ordinal}
+          </span>
+          <span>{label}</span>
+          {formatPages(titulo.pages) && <span className="ml-auto text-xs text-slate-500">{formatPages(titulo.pages)}</span>}
+        </summary>
+        <div className="mt-3 space-y-3 border-l-2 border-indigo-100/70 pl-4">
+          {renderCapitulos(titulo.capitulos)}
+          {renderArticulos(titulo.articulos)}
+        </div>
+      </details>
+    )
+  })
+
+  const frontMatterCards = [
+    { label: 'Preámbulo', entry: outline.front_matter.preambulo },
+    { label: 'Exposición de motivos', entry: outline.front_matter.exposicion_motivos },
+  ].filter((item) => item.entry?.present)
+
+  const disposSections = (Object.entries(outline.disposiciones) as [keyof typeof DISPOSITION_PREFIX, DisposicionItem[]][]) 
+    .map(([key, list]) => renderDisposGroup(`Disposiciones ${key.charAt(0).toUpperCase()}${key.slice(1)}`, DISPOSITION_PREFIX[key], list))
+    .filter(Boolean)
+
+  return (
+    <div className="space-y-4">
+      <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 text-sm shadow-sm">
+        <div className="text-base font-semibold text-slate-800">{outline.metadata.document_title}</div>
+        <div className="mt-1 text-xs text-slate-600">Fuente: {outline.metadata.source}</div>
+        <div className="mt-1 text-xs text-slate-500">
+          Generado el {outline.metadata.generated_at} · Idioma: {outline.metadata.language.toUpperCase()}
+        </div>
+      </div>
+
+      {frontMatterCards.length > 0 && (
+        <div className="flex flex-wrap gap-3">
+          {frontMatterCards.map(({ label, entry }) => (
+            <div key={label} className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs shadow-sm">
+              <div className="font-semibold text-emerald-700">{label}</div>
+              {formatPages(entry.pages) && <div className="text-[11px] text-emerald-600">{formatPages(entry.pages)}</div>}
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+        {tituloCards}
+      </div>
+
+      {disposSections.length > 0 && (
+        <div className="space-y-3">{disposSections}</div>
+      )}
+    </div>
+  )
+}
 
 export default function GeneratePage() {
   // PDF/bloques
   const [pdfFile, setPdfFile] = useState<File | null>(null)
   const [blocks, setBlocks] = useState<any[]>([])
   const [pagesFull, setPagesFull] = useState<any[]>([])
+  const [pdfSchema, setPdfSchema] = useState<string | null>(null)
   const [fileHash, setFileHash] = useState<string | null>(null)
   const [pagesCount, setPagesCount] = useState<number | null>(null)
   const [uploading, setUploading] = useState(false)
@@ -63,9 +347,11 @@ export default function GeneratePage() {
   const [summaryMode, setSummaryMode] = useState<'rapido' | 'exhaustivo'>('exhaustivo')
   const [summary, setSummary] = useState<any | null>(null)
   const [summLoading, setSummLoading] = useState(false)
-  const [outline, setOutline] = useState<Outline | null>(null)
-  const [outlineLoading, setOutlineLoading] = useState(false)
-  const [outlineError, setOutlineError] = useState<string | null>(null)
+  const [mentalOutline, setMentalOutline] = useState<MentalOutline | null>(null)
+  const [mentalOutlineLoading, setMentalOutlineLoading] = useState(false)
+  const [mentalOutlineError, setMentalOutlineError] = useState<string | null>(null)
+  const [mentalOutlineProgress, setMentalOutlineProgress] = useState<OutlineProgress | null>(null)
+  const [outlineViewMode, setOutlineViewMode] = useState<'tree' | 'json'>('tree')
 
   // Paginación
   const PAGE_SIZE = 5
@@ -75,6 +361,12 @@ export default function GeneratePage() {
   const pageEnd = Math.min(items.length, page * PAGE_SIZE)
   const pageItems = useMemo(() => items.slice(pageStart, pageEnd), [items, page, pageStart, pageEnd])
   useEffect(() => { setPage(1) }, [items])
+
+  useEffect(() => {
+    if (mentalOutline) {
+      setOutlineViewMode('tree')
+    }
+  }, [mentalOutline])
   const unansweredVisible = useMemo(
     () => pageItems.reduce((acc, _, i) => acc + (answers[pageStart + i] ? 0 : 1), 0),
     [pageItems, answers, pageStart]
@@ -178,9 +470,11 @@ export default function GeneratePage() {
       setPagesCount(typeof data?.pages === 'number' ? data.pages : data?.meta?.numPages ?? null)
       setBlocks(data.blocks || [])
       setPagesFull(data.pagesFull || [])
+      setPdfSchema(data.pdfSchema || null)
       setFileHash(data?.meta?.fileHash || null)
       setLastMetaInfo(data?.meta?.info || null)
-      setOutline(null)
+      setMentalOutline(null)
+      setMentalOutlineError(null)
       if (!userEditedLawName) {
         const auto = deriveLawName(data?.meta?.info, pdfFile)
         if (auto) setLawName(auto)
@@ -309,76 +603,129 @@ export default function GeneratePage() {
     }
   }
 
-  async function onGenerateOutline() {
-    if (!pagesFull.length && !blocks.length) return
-    setOutlineLoading(true)
-    setOutlineError(null)
+  async function generateMentalOutlineSingle() {
+    if (!pagesFull.length) {
+      setMentalOutlineError('Primero sube el PDF y espera al análisis completo.')
+      return
+    }
+    setMentalOutlineLoading(true)
+    setMentalOutlineError(null)
     try {
-      const res = await fetch('/api/outline', {
+      const res = await fetch('/api/mental-outline', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ lawName, pagesFull, blocks }),
+        body: JSON.stringify({
+          lawName,
+          source: lawName || pdfFile?.name || 'Documento sin título',
+          pagesFull,
+        }),
       })
-      const txt = await res.text()
-      let data: any = null
-      try {
-        data = JSON.parse(txt)
-      } catch {
-        const s = txt.indexOf('{')
-        const e = txt.lastIndexOf('}')
-        if (s >= 0 && e > s) {
-          try { data = JSON.parse(txt.slice(s, e + 1)) } catch {}
-        }
+      const data = await res.json()
+      if (!res.ok || !data?.ok) {
+        throw new Error(data?.error || 'Error generando esquema')
       }
-      if (!data) throw new Error('Respuesta no JSON del servidor')
-      if (!data.ok) throw new Error(data.error || 'Error generando esquema')
-      console.debug('[outline]', data)
-      setOutline(data.outline || null)
+      setMentalOutline(data.outline as MentalOutline)
     } catch (e: any) {
-      setOutline(null)
-      setOutlineError(e.message || 'Error generando esquema')
+      setMentalOutlineError(e?.message || 'Error generando esquema')
     } finally {
-      setOutlineLoading(false)
+      setMentalOutlineLoading(false)
     }
   }
 
-  const outlineMermaid = useMemo(() => {
-    if (!outline) return ''
-    function walk(node: OutlineNode, depth: number): string {
-      const indent = '  '.repeat(depth)
-      const extras = [node.label]
-      if (node.pages) extras.push(`(${node.pages})`)
-      const label = extras.join(' ').replace(/"/g, '\\"')
-      let out = `${indent}${label}\n`
-      if (node.children) {
-        for (const child of node.children) out += walk(child, depth + 1)
-      }
-      return out
+  async function generateMentalOutlineChunks() {
+    if (!pagesFull.length) {
+      setMentalOutlineError('Primero sube el PDF y espera al análisis completo.')
+      return
     }
-    return `mindmap\n${walk(outline.root, 1)}`
-  }, [outline])
 
-  function OutlineTree({ node }: { node: OutlineNode }) {
-    const hasChildren = Array.isArray(node.children) && node.children.length > 0
-    const labelParts = [node.label]
-    if (node.pages) labelParts.push(`(${node.pages})`)
-    if (node.articulos?.length) labelParts.push(`Art.: ${node.articulos.join(', ')}`)
-    const label = labelParts.join(' ')
-    if (!hasChildren) {
-      return <li className="text-sm text-slate-700 whitespace-normal break-words ml-4">{label}</li>
+    const totalPages = pagesFull.length
+    if (!totalPages) {
+      setMentalOutlineError('No hay páginas disponibles para procesar.')
+      return
     }
-    return (
-      <li className="text-sm text-slate-700 whitespace-normal break-words">
-        <details open className="ml-2">
-          <summary className="cursor-pointer font-medium text-slate-800 whitespace-normal break-words leading-snug">{label}</summary>
-          <ul className="ml-4 border-l border-slate-200 pl-3 space-y-1">
-            {node.children!.map((child) => (
-              <OutlineTree key={child.id} node={child} />
-            ))}
-          </ul>
-        </details>
-      </li>
-    )
+
+    setMentalOutlineLoading(true)
+    setMentalOutlineError(null)
+    setMentalOutlineProgress({ processed: 0, total: totalPages, lastChunk: 0 })
+
+    const today = new Date().toISOString().slice(0, 10)
+    let metadataSeed = mentalOutline?.metadata || {
+      document_title: lawName || pdfFile?.name?.replace(/\.[^.]+$/, '') || 'Documento legal',
+      source: lawName || pdfFile?.name || 'Documento legal',
+      language: 'es',
+      generated_at: today,
+    }
+
+    let schema: MentalOutline | null = mentalOutline
+    let processedPages = 0
+    let startIndex = 0
+    const adaptiveSizes = [...MENTAL_OUTLINE_CHUNK_SIZES]
+    try {
+      while (startIndex < totalPages) {
+        const remaining = totalPages - startIndex
+        let applied = false
+        let attemptError: any = null
+
+        for (let sizeIndex = 0; sizeIndex < adaptiveSizes.length; sizeIndex += 1) {
+          const candidateSize = adaptiveSizes[sizeIndex]
+          const size = Math.min(candidateSize, remaining)
+          if (size <= 0) continue
+          const chunk = pagesFull.slice(startIndex, startIndex + size)
+
+          try {
+            const res = await fetch('/api/mental-outline/chunk', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                lawName,
+                source: lawName || pdfFile?.name || 'Documento sin título',
+                schema,
+                metadata: metadataSeed,
+                pagesChunk: chunk,
+              }),
+            })
+            let data: any = {}
+            try {
+              data = await res.json()
+            } catch {}
+            if (!res.ok || !data?.ok) {
+              throw new Error(data?.error || `Error generando lote (${chunk.length} pág.)`)
+            }
+
+            schema = data.outline as MentalOutline
+            setMentalOutline(schema)
+            metadataSeed = schema.metadata || metadataSeed
+
+            processedPages += chunk.length
+            startIndex += chunk.length
+            setMentalOutlineProgress({ processed: processedPages, total: totalPages, lastChunk: chunk.length })
+            applied = true
+            break
+          } catch (err: any) {
+            attemptError = err
+            if (candidateSize > 1) {
+              const idx = adaptiveSizes.indexOf(candidateSize)
+              if (idx !== -1) {
+                adaptiveSizes.splice(idx, 1)
+                sizeIndex -= 1
+              }
+            }
+            // Intentamos con un lote más pequeño en la siguiente iteración
+            continue
+          }
+        }
+
+        if (!applied) {
+          const fallbackMsg = attemptError?.message || 'Error generando esquema por lotes'
+          throw new Error(`Fallo procesando páginas ${startIndex + 1}-${Math.min(totalPages, startIndex + MENTAL_OUTLINE_CHUNK_SIZES[0])}: ${fallbackMsg}`)
+        }
+      }
+    } catch (e: any) {
+      setMentalOutlineError(e?.message || 'Error generando esquema por lotes')
+    } finally {
+      setMentalOutlineLoading(false)
+      setMentalOutlineProgress(null)
+    }
   }
 
   return (
@@ -650,51 +997,76 @@ export default function GeneratePage() {
         </div>
       </Modal>
 
-      {/* Outline / mapa mental */}
       <section className="mx-auto max-w-5xl px-3 pb-6">
-        <div className="rounded-xl border border-slate-200 bg-white p-3 text-sm space-y-3">
+        <div className="rounded-xl border border-slate-200 p-3 text-sm space-y-3 bg-white text-slate-800">
           <div className="flex flex-wrap items-center gap-2">
-            <div className="font-medium text-sm">Esquema / mapa mental</div>
-            <button
-              type="button"
-              onClick={onGenerateOutline}
-              disabled={outlineLoading || (!pagesFull.length && !blocks.length)}
-              className="ml-auto h-9 px-3 rounded-lg bg-sky-600 text-white text-sm disabled:opacity-50"
-            >
-              {outlineLoading ? 'Generando…' : 'Generar esquema'}
-            </button>
+            <div className="font-medium text-sm">Esquema estructurado (IA)</div>
+            <div className="ml-auto flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={generateMentalOutlineSingle}
+                disabled={mentalOutlineLoading || !pagesFull.length}
+                className="h-9 px-3 rounded-lg bg-sky-600 text-white text-sm disabled:opacity-50"
+              >
+                {mentalOutlineLoading ? 'Generando…' : 'Una llamada'}
+              </button>
+              <button
+                type="button"
+                onClick={generateMentalOutlineChunks}
+                disabled={mentalOutlineLoading || !pagesFull.length}
+                className="h-9 px-3 rounded-lg bg-indigo-600 text-white text-sm disabled:opacity-50"
+              >
+                {mentalOutlineLoading ? 'Generando…' : `Por lotes (hasta ${MENTAL_OUTLINE_CHUNK_SIZES[0]} pág.)`}
+              </button>
+            </div>
           </div>
-          {outlineError && <div className="text-xs text-red-600">{outlineError}</div>}
-          {outline && (
-            <div className="space-y-2">
-              <div className="flex gap-2 text-xs">
+          {mentalOutlineProgress && (
+            <div className="text-xs text-slate-600">
+              Procesadas {mentalOutlineProgress.processed} / {mentalOutlineProgress.total} páginas
+              {mentalOutlineProgress.lastChunk > 0 && ` · Último lote: ${mentalOutlineProgress.lastChunk} pág.`}
+            </div>
+          )}
+          {mentalOutlineError && <div className="text-xs text-red-500">{mentalOutlineError}</div>}
+          {mentalOutline && (
+            <div className="space-y-3">
+              <div className="flex flex-wrap items-center gap-2 text-xs">
+                <div className="flex rounded-lg border border-slate-300 bg-slate-100 p-1">
+                  <button
+                    type="button"
+                    onClick={() => setOutlineViewMode('tree')}
+                    className={`rounded-md px-2 py-1 ${outlineViewMode === 'tree' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}
+                  >
+                    Vista estructurada
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setOutlineViewMode('json')}
+                    className={`rounded-md px-2 py-1 ${outlineViewMode === 'json' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}
+                  >
+                    JSON
+                  </button>
+                </div>
                 <button
                   type="button"
-                  onClick={() => navigator.clipboard.writeText(JSON.stringify(outline, null, 2))}
-                  className="px-2 py-1 rounded border border-slate-300"
+                  onClick={() => navigator.clipboard.writeText(JSON.stringify(mentalOutline, null, 2))}
+                  className="ml-auto px-2 py-1 rounded border border-slate-300 hover:bg-slate-100"
                 >
                   Copiar JSON
                 </button>
-                <button
-                  type="button"
-                  onClick={() => navigator.clipboard.writeText(outlineMermaid)}
-                  className="px-2 py-1 rounded border border-slate-300"
-                >
-                  Copiar Mermaid
-                </button>
               </div>
-              <div className="max-h-[70vh] overflow-y-auto pr-2">
-                <div className="text-sm font-semibold text-slate-800 mb-1">{outline.root.label}</div>
-                <ul className="space-y-1">
-                  {outline.root.children?.map((child) => (
-                    <OutlineTree key={child.id} node={child} />
-                  ))}
-                </ul>
-              </div>
+              {outlineViewMode === 'json' ? (
+                <pre className="max-h-[70vh] overflow-y-auto whitespace-pre-wrap rounded border border-slate-200 bg-slate-50 p-2 text-xs">
+{JSON.stringify(mentalOutline, null, 2)}
+                </pre>
+              ) : (
+                <div className="max-h-[70vh] overflow-y-auto pr-1">
+                  <OutlineTree outline={mentalOutline} />
+                </div>
+              )}
             </div>
           )}
-          {!outline && !outlineLoading && !outlineError && (
-            <div className="text-xs text-slate-500">Genera un esquema para visualizar la ley como mapa mental.</div>
+          {!mentalOutline && !mentalOutlineLoading && !mentalOutlineError && (
+            <div className="text-xs text-slate-500">Sube un PDF y genera el esquema estructurado completo.</div>
           )}
         </div>
       </section>
