@@ -118,7 +118,10 @@ function resolveLabel(kind: keyof typeof ORDINAL_REGEX, text: string | undefined
 
 function normalizeArticleNumber(raw: string | undefined | null, text: string | undefined | null, index: number) {
   const cleaned = raw?.replace(/\?/g, '').trim()
-  if (cleaned) return cleaned
+  if (cleaned) {
+    // Eliminar "Artículo" del número si está presente (para evitar duplicación en el frontend)
+    return cleaned.replace(/^Art[íi]culo\s+/i, '').trim()
+  }
   if (text) {
     const match = text.match(ARTICLE_NUMBER_REGEX)
     if (match) return match[1].replace(/\.$/, '').trim()
@@ -148,24 +151,195 @@ function normalizeDispositionHeading(prefix: string, item: DisposicionItem, numb
   return `Disposición ${prefix} ${number}`
 }
 
-function OutlineTree({ outline }: { outline: MentalOutline }) {
-  const renderArticulos = (articulos: MentalOutline['titulos'][number]['articulos']) => {
-    if (!articulos?.length) return null
-    return (
-      <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-        {articulos.map((art, idx) => {
+function OutlineTree({ outline, pagesFull }: { outline: MentalOutline, pagesFull: { num: number, text: string }[] }) {
+  const pageTextMap = useMemo(() => {
+    const map = new Map<number, string>()
+    ;(pagesFull || []).forEach((p) => {
+      if (p && typeof p.num === 'number' && typeof p.text === 'string') {
+        map.set(p.num, p.text)
+      }
+    })
+    return map
+  }, [pagesFull])
+
+  // Escaneo de todo el documento para localizar los inicios reales de cada TÍTULO
+  const titleStartsByOrdinal = useMemo(() => {
+    const ordToStart = new Map<string, number>()
+    const re = /^\s*[—–\-•]?\s*T[ÍI]TULO\s+(PRELIMINAR|[IVXLCDM]+|\d+)\b.*$/i
+    ;(pagesFull || []).forEach((p) => {
+      const text = (p?.text || '').split(/\r?\n+/)
+      for (const raw of text) {
+        const line = raw.trim()
+        if (!line) continue
+        const m = line.match(re)
+        if (m) {
+          const ord = (m[1] || '').toString().toUpperCase()
+          if (!ordToStart.has(ord)) {
+            ordToStart.set(ord, p.num)
+          } else {
+            // mantener el más temprano
+            ordToStart.set(ord, Math.min(ordToStart.get(ord) as number, p.num))
+          }
+        }
+      }
+    })
+    return ordToStart
+  }, [pagesFull])
+
+  const extractDefinitionFromSameLine = (text?: string | null) => {
+    if (!text) return ''
+    const m = text.match(/^[—–\-•]?\s*T[ÍI]TULO\s+(PRELIMINAR|[IVXLCDM]+|\d+)\s*(?:[.:;—–\-]\s*(.+))?$/i)
+    if (m && m[2]) return m[2].trim()
+    return ''
+  }
+
+  const extractDefinitionFromField = (text?: string | null) => {
+    const t = text?.trim() || ''
+    if (!t) return ''
+    if (/^T[ÍI]TULO\b/i.test(t)) return ''
+    return t
+  }
+
+  const extractDefinitionFromPage = (pageNum?: number | null) => {
+    if (!pageNum) return ''
+    const pageText = pageTextMap.get(pageNum)
+    if (!pageText) return ''
+    const lines = pageText.split(/\r?\n+/).map((l) => l.trim())
+    for (let i = 0; i < lines.length; i += 1) {
+      const line = lines[i]
+      if (!line) continue
+      const titleMatch = line.match(/^[—–\-•]?\s*T[ÍI]TULO\s+(PRELIMINAR|[IVXLCDM]+|\d+)\s*(?:[.:;—–\-]\s*(.+))?$/i)
+      if (titleMatch) {
+        if (titleMatch[2]) return titleMatch[2].trim()
+        for (let j = i + 1; j < lines.length; j += 1) {
+          const next = lines[j]
+          if (!next) continue
+          if (/^(CAP[ÍI]TULO|SECCI[ÓO]N|ART[ÍI]CULO)\b/i.test(next)) break
+          return next.trim()
+        }
+      }
+    }
+    return ''
+  }
+
+  const computeDisplayPageRange = (idx: number): number[] => {
+    const current = outline.titulos[idx]
+    // Usar directamente el rango completo del esquema, que ya está calculado correctamente
+    const pagesArr = Array.isArray(current.pages) ? current.pages.slice().sort((a, b) => a - b) : []
+    if (pagesArr.length > 0) {
+      // El esquema ya tiene el rango completo [inicio, ..., fin]
+      // Solo necesitamos asegurarnos de que esté ordenado y sin duplicados
+      return Array.from(new Set(pagesArr)).sort((a, b) => a - b)
+    }
+    // Fallback: si no hay páginas en el esquema, intentar detectar desde otras fuentes
+    const ordinal = resolveOrdinal('titulo', current.ordinal, current.titulo_texto, idx)
+    const startScan = titleStartsByOrdinal.get(ordinal) ?? null
+    const allArticlePages: number[] = []
+    ;(current.articulos || []).forEach((a) => Array.isArray(a.pages) && a.pages.length && allArticlePages.push(a.pages[0]))
+    ;(current.capitulos || []).forEach((cap) => {
+      ;(cap.articulos || []).forEach((a) => Array.isArray(a.pages) && a.pages.length && allArticlePages.push(a.pages[0]))
+    })
+    const startFirstArticle = allArticlePages.length ? Math.min(...allArticlePages) : null
+    const start = [startScan, startFirstArticle].filter((v): v is number => typeof v === 'number').sort((a, b) => a - b)[0] ?? null
+    if (!start) return []
+    // Si no hay rango en el esquema, intentar calcular el fin basándose en el siguiente título
+    const next = outline.titulos[idx + 1]
+    const nextStart = next && Array.isArray(next.pages) && next.pages.length ? Math.min(...next.pages) : null
+    if (typeof nextStart === 'number' && nextStart > start) {
+      const end = nextStart - 1
+      return end > start ? [start, end] : [start]
+    }
+    return [start]
+  }
+  // Componente para artículo con resumen al hacer clic
+  const ArticuloCard = ({ art, idx, pagesFull }: { art: NonNullable<MentalOutline['titulos'][number]['articulos']>[number], idx: number, pagesFull: { num: number, text: string }[] }) => {
+    const [resumen, setResumen] = useState<string | null>(art.resumen || null)
+    const [loading, setLoading] = useState(false)
+    const [expanded, setExpanded] = useState(false)
+
+    const handleClick = async () => {
+      if (resumen) {
+        // Si ya tenemos el resumen, solo expandir/colapsar
+        setExpanded(!expanded)
+        return
+      }
+
+      if (loading) return
+
+      setLoading(true)
+      setExpanded(true)
+
+      try {
+        // Extraer número del artículo (puede ser "Artículo 1", "Artículo 11", etc.)
+        const numeroMatch = art.numero.match(/(\d+|[IVXLCDM]+|bis|ter)/i)
+        const articuloNumero = numeroMatch ? numeroMatch[1] : art.numero.replace(/Art[íi]culo\s+/i, '').trim()
+
+        const response = await fetch('/api/mental-outline/extract-article', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            pagesFull: pagesFull,
+            articuloNumero: articuloNumero,
+            articuloPagina: art.pagina_articulo
+          })
+        })
+
+        const data = await response.json()
+        if (!response.ok) {
+          throw new Error(data.error || `Error ${response.status}: ${response.statusText}`)
+        }
+
+        if (data.ok && data.resumen) {
+          setResumen(data.resumen)
+        } else if (data.ok && data.texto_completo) {
+          // Si hay texto pero no resumen, mostrar mensaje
+          setResumen('Resumen no disponible.')
+        } else {
+          throw new Error(data.error || 'No se pudo generar el resumen.')
+        }
+      } catch (error: any) {
+        console.error('Error extrayendo resumen:', error)
+        setResumen(`Error: ${error.message || 'No se pudo generar el resumen.'}`)
+      } finally {
+        setLoading(false)
+      }
+    }
+
           const number = normalizeArticleNumber(art.numero, art.articulo_texto, idx)
           const heading = normalizeArticleHeading(art.articulo_texto, number)
+
           return (
-            <div key={art.anchor || `${number}-${idx}`} className="rounded-lg border border-slate-200 bg-slate-50 p-2 text-xs shadow-sm">
+      <div 
+        key={art.anchor || `${number}-${idx}`} 
+        className="rounded-lg border border-slate-200 bg-slate-50 p-2 text-xs shadow-sm cursor-pointer hover:bg-slate-100 transition-colors"
+        onClick={handleClick}
+      >
               <div className="font-semibold text-slate-700">Artículo {number}</div>
               {heading && (
                 <div className="mt-1 text-slate-600">{heading}</div>
               )}
               {formatPages(art.pages) && <div className="mt-1 text-[11px] text-slate-500">{formatPages(art.pages)}</div>}
+        
+        {expanded && (
+          <div className="mt-2 pt-2 border-t border-slate-200">
+            {loading ? (
+              <div className="text-[11px] text-slate-500 italic">Generando resumen...</div>
+            ) : resumen ? (
+              <div className="text-[11px] text-slate-700 leading-relaxed">{resumen}</div>
+            ) : null}
+          </div>
+        )}
             </div>
           )
-        })}
+  }
+
+  const renderArticulos = (articulos: MentalOutline['titulos'][number]['articulos']) => {
+    if (!articulos?.length) return null
+    return (
+      <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+        {articulos.map((art, idx) => (
+          <ArticuloCard key={art.anchor || `art-${idx}`} art={art} idx={idx} pagesFull={pagesFull} />
+        ))}
       </div>
     )
   }
@@ -251,15 +425,30 @@ function OutlineTree({ outline }: { outline: MentalOutline }) {
 
   const tituloCards = outline.titulos.map((titulo, index) => {
     const ordinal = resolveOrdinal('titulo', titulo.ordinal, titulo.titulo_texto, index)
-    const label = resolveLabel('titulo', titulo.titulo_texto, ordinal)
+    const startFromSchema = Array.isArray(titulo.pages) && titulo.pages.length ? titulo.pages[0] : null
+    const startFromScan = titleStartsByOrdinal.get(ordinal) ?? null
+    const startPage = startFromScan ?? startFromSchema
+    const defFromField = extractDefinitionFromField(titulo.titulo_texto)
+    const defFromLine = defFromField ? '' : extractDefinitionFromSameLine(titulo.titulo_texto)
+    const defFromPage = (defFromField || defFromLine) ? '' : extractDefinitionFromPage(startPage || undefined)
+    const definition = (defFromField || defFromLine || defFromPage).trim()
+    // Solo mostrar la página de inicio (la del índice)
+    const displayRange = (() => {
+      // Priorizar la página del esquema (que viene del índice)
+      if (startFromSchema) {
+        return [startFromSchema]
+      }
+      // Fallback: usar startFromScan si no hay página del esquema
+      return startFromScan ? [startFromScan] : []
+    })()
     return (
-      <details key={titulo.anchor || `${label}-${index}`} open className="rounded-2xl border border-slate-200 bg-white p-3 text-sm shadow-sm transition-all">
+      <details key={titulo.anchor || `titulo-${ordinal}-${index}`} open className="rounded-2xl border border-slate-200 bg-white p-3 text-sm shadow-sm transition-all">
         <summary className="flex cursor-pointer flex-wrap items-center gap-2 text-slate-800">
           <span className="rounded-lg bg-indigo-100 px-2 py-0.5 text-xs font-semibold uppercase tracking-wide text-indigo-700">
             Título {ordinal}
           </span>
-          <span>{label}</span>
-          {formatPages(titulo.pages) && <span className="ml-auto text-xs text-slate-500">{formatPages(titulo.pages)}</span>}
+          {definition && <span>{definition}</span>}
+          {formatPages(displayRange) && <span className="ml-auto text-xs text-slate-500">{formatPages(displayRange)}</span>}
         </summary>
         <div className="mt-3 space-y-3 border-l-2 border-indigo-100/70 pl-4">
           {renderCapitulos(titulo.capitulos)}
@@ -270,21 +459,21 @@ function OutlineTree({ outline }: { outline: MentalOutline }) {
   })
 
   const frontMatterCards = [
-    { label: 'Preámbulo', entry: outline.front_matter.preambulo },
-    { label: 'Exposición de motivos', entry: outline.front_matter.exposicion_motivos },
+    { label: 'Preámbulo', entry: outline.front_matter?.preambulo },
+    { label: 'Exposición de motivos', entry: outline.front_matter?.exposicion_motivos },
   ].filter((item) => item.entry?.present)
 
-  const disposSections = (Object.entries(outline.disposiciones) as [keyof typeof DISPOSITION_PREFIX, DisposicionItem[]][]) 
+  const disposSections = (Object.entries(outline.disposiciones || {}) as [keyof typeof DISPOSITION_PREFIX, DisposicionItem[]][]) 
     .map(([key, list]) => renderDisposGroup(`Disposiciones ${key.charAt(0).toUpperCase()}${key.slice(1)}`, DISPOSITION_PREFIX[key], list))
     .filter(Boolean)
 
   return (
     <div className="space-y-4">
       <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 text-sm shadow-sm">
-        <div className="text-base font-semibold text-slate-800">{outline.metadata.document_title}</div>
-        <div className="mt-1 text-xs text-slate-600">Fuente: {outline.metadata.source}</div>
+        <div className="text-base font-semibold text-slate-800">{outline.metadata?.document_title}</div>
+        <div className="mt-1 text-xs text-slate-600">Fuente: {outline.metadata?.source}</div>
         <div className="mt-1 text-xs text-slate-500">
-          Generado el {outline.metadata.generated_at} · Idioma: {outline.metadata.language.toUpperCase()}
+          Generado el {outline.metadata?.generated_at} · Idioma: {(outline.metadata?.language || "es").toUpperCase()}
         </div>
       </div>
 
@@ -315,6 +504,7 @@ export default function GeneratePage() {
   const [pdfFile, setPdfFile] = useState<File | null>(null)
   const [blocks, setBlocks] = useState<any[]>([])
   const [pagesFull, setPagesFull] = useState<any[]>([])
+  const [pagesFullRaw, setPagesFullRaw] = useState<any[]>([]) // Páginas completas incluyendo front matter (para buscar índice)
   const [pdfSchema, setPdfSchema] = useState<string | null>(null)
   const [fileHash, setFileHash] = useState<string | null>(null)
   const [pagesCount, setPagesCount] = useState<number | null>(null)
@@ -470,6 +660,7 @@ export default function GeneratePage() {
       setPagesCount(typeof data?.pages === 'number' ? data.pages : data?.meta?.numPages ?? null)
       setBlocks(data.blocks || [])
       setPagesFull(data.pagesFull || [])
+      setPagesFullRaw(data.pagesFullRaw || data.pagesFull || []) // Guardar páginas completas para buscar índice
       setPdfSchema(data.pdfSchema || null)
       setFileHash(data?.meta?.fileHash || null)
       setLastMetaInfo(data?.meta?.info || null)
@@ -632,6 +823,38 @@ export default function GeneratePage() {
     }
   }
 
+  async function generateMentalOutlineDirect() {
+    if (!pagesFull.length) {
+      setMentalOutlineError('Primero sube el PDF y espera al análisis completo.')
+      return
+    }
+    setMentalOutlineLoading(true)
+    setMentalOutlineError(null)
+    try {
+      // Usar pagesFullRaw (con front matter) para buscar el índice, ya que el índice puede estar en las primeras páginas
+      const pagesToUse = pagesFullRaw.length > 0 ? pagesFullRaw : pagesFull
+      const res = await fetch('/api/mental-outline/generate-direct', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          lawName,
+          source: lawName || pdfFile?.name || 'Documento sin título',
+          pagesFull: pagesToUse,
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok || !data?.ok) {
+        throw new Error(data?.error || 'Error generando esquema')
+      }
+      // Transformar el esquema al formato esperado por el frontend
+      setMentalOutline(data.schema as MentalOutline)
+    } catch (e: any) {
+      setMentalOutlineError(e?.message || 'Error generando esquema')
+    } finally {
+      setMentalOutlineLoading(false)
+    }
+  }
+
   async function generateMentalOutlineChunks() {
     if (!pagesFull.length) {
       setMentalOutlineError('Primero sube el PDF y espera al análisis completo.')
@@ -657,6 +880,7 @@ export default function GeneratePage() {
     }
 
     let schema: MentalOutline | null = mentalOutline
+    let indiceText = '' // Guardar el índice para pasarlo en cada chunk
     let processedPages = 0
     let startIndex = 0
     const adaptiveSizes = [...MENTAL_OUTLINE_CHUNK_SIZES]
@@ -681,7 +905,8 @@ export default function GeneratePage() {
                 source: lawName || pdfFile?.name || 'Documento sin título',
                 schema,
                 metadata: metadataSeed,
-                pagesChunk: chunk,
+                pagesFull: chunk, // Cambiado de pagesChunk a pagesFull
+                indice: indiceText, // Pasar el índice detectado
               }),
             })
             let data: any = {}
@@ -692,9 +917,296 @@ export default function GeneratePage() {
               throw new Error(data?.error || `Error generando lote (${chunk.length} pág.)`)
             }
 
-            schema = data.outline as MentalOutline
+            // Mergear el nuevo outline con el esquema acumulado
+            const mergeOutlines = (base: MentalOutline | null, incoming: MentalOutline): MentalOutline => {
+              if (!base) return incoming
+
+              // Extraer ordinal de código (ej: "TÍTULO I" -> "I")
+              const extractOrdinal = (codigo: string): string => {
+                const match = String(codigo || '').match(/(PRELIMINAR|[IVXLCDM]+|\d+)/i)
+                return match ? match[1].toUpperCase() : '?'
+              }
+
+              // Mergear títulos
+              const mergeTitulos = (baseTitulos: any[], incomingTitulos: any[]): any[] => {
+                const result = [...baseTitulos]
+                const baseMap = new Map<string, number>()
+                baseTitulos.forEach((t, idx) => {
+                  const ord = extractOrdinal(t.codigo_titulo || t.ordinal || '')
+                  if (ord && ord !== '?') baseMap.set(ord, idx)
+                })
+
+                incomingTitulos.forEach((incomingTitulo: any) => {
+                  const ord = extractOrdinal(incomingTitulo.codigo_titulo || incomingTitulo.ordinal || '')
+                  if (!ord || ord === '?') {
+                    // Título sin ordinal válido: agregarlo
+                    result.push(incomingTitulo)
+                    return
+                  }
+
+                  const baseIdx = baseMap.get(ord)
+                  if (baseIdx !== undefined) {
+                    // Ya existe: mergear contenido
+                    const baseTitulo = result[baseIdx]
+                    // Obtener artículos (pueden estar en articulos o articulos_sin_capitulo)
+                    const baseArts = baseTitulo.articulos || baseTitulo.articulos_sin_capitulo || []
+                    const incomingArts = incomingTitulo.articulos || incomingTitulo.articulos_sin_capitulo || []
+                    // Preferir el que tiene más contenido o mejor información
+                    const baseHasContent = baseArts.length + (baseTitulo.capitulos?.length || 0) > 0
+                    const incomingHasContent = incomingArts.length + (incomingTitulo.capitulos?.length || 0) > 0
+
+                    if (incomingHasContent && !baseHasContent) {
+                      // El incoming tiene contenido y el base no: reemplazar
+                      result[baseIdx] = incomingTitulo
+                    } else if (incomingHasContent && baseHasContent) {
+                      // Ambos tienen contenido: mergear
+                      const mergedArts = mergeArticulos(baseArts, incomingArts)
+                      const mergedCaps = mergeCapitulos(baseTitulo.capitulos || [], incomingTitulo.capitulos || [])
+                      result[baseIdx] = {
+                        ...baseTitulo,
+                        // Mantener la página de inicio más temprana
+                        pagina_inicio_titulo: Math.min(
+                          baseTitulo.pagina_inicio_titulo || 9999,
+                          incomingTitulo.pagina_inicio_titulo || 9999
+                        ),
+                        // Mantener propiedades transformadas si existen
+                        ordinal: baseTitulo.ordinal || ord,
+                        titulo_texto: baseTitulo.titulo_texto || incomingTitulo.titulo_texto || baseTitulo.subtitulo_titulo || incomingTitulo.subtitulo_titulo,
+                        pages: baseTitulo.pages || incomingTitulo.pages,
+                        anchor: baseTitulo.anchor || incomingTitulo.anchor,
+                        // Mergear artículos (evitar duplicados)
+                        articulos: mergedArts,
+                        articulos_sin_capitulo: mergedArts,
+                        // Mergear capítulos
+                        capitulos: mergedCaps
+                      }
+                    }
+                    // Si base tiene contenido y incoming no, mantener base
+                  } else {
+                    // No existe: agregarlo
+                    baseMap.set(ord, result.length)
+                    result.push(incomingTitulo)
+                  }
+                })
+
+                return result
+              }
+
+              // Mergear capítulos
+              const mergeCapitulos = (baseCaps: any[], incomingCaps: any[]): any[] => {
+                const result = [...baseCaps]
+                const baseMap = new Map<string, number>()
+                baseCaps.forEach((c, idx) => {
+                  const ord = extractOrdinal(c.codigo_capitulo || c.ordinal || '')
+                  if (ord && ord !== '?') baseMap.set(ord, idx)
+                })
+
+                incomingCaps.forEach((incomingCap: any) => {
+                  const ord = extractOrdinal(incomingCap.codigo_capitulo || incomingCap.ordinal || '')
+                  if (!ord || ord === '?') {
+                    result.push(incomingCap)
+                    return
+                  }
+
+                  const baseIdx = baseMap.get(ord)
+                  if (baseIdx !== undefined) {
+                    const baseCap = result[baseIdx]
+                    const baseArts = baseCap.articulos || baseCap.articulos_sin_seccion || []
+                    const incomingArts = incomingCap.articulos || incomingCap.articulos_sin_seccion || []
+                    const baseHasContent = baseArts.length + (baseCap.secciones?.length || 0) > 0
+                    const incomingHasContent = incomingArts.length + (incomingCap.secciones?.length || 0) > 0
+
+                    // Siempre hacer merge si hay contenido en cualquiera de los dos
+                    if (baseHasContent || incomingHasContent) {
+                      const mergedArts = mergeArticulos(baseArts, incomingArts)
+                      
+                      // Priorizar la página del índice (del array pages) sobre pagina_inicio_capitulo
+                      const baseIndexPage = baseCap.pages?.[0]
+                      const incomingIndexPage = incomingCap.pages?.[0]
+                      const finalIndexPage = incomingIndexPage || baseIndexPage
+                      const finalPaginaInicio = finalIndexPage || Math.min(
+                        baseCap.pagina_inicio_capitulo || 9999,
+                        incomingCap.pagina_inicio_capitulo || 9999
+                      )
+                      
+                      result[baseIdx] = {
+                        ...baseCap,
+                        pagina_inicio_capitulo: finalPaginaInicio,
+                        // Mantener propiedades transformadas, priorizando la página del índice
+                        ordinal: baseCap.ordinal || ord,
+                        capitulo_texto: baseCap.capitulo_texto || incomingCap.capitulo_texto || baseCap.subtitulo_capitulo || incomingCap.subtitulo_capitulo,
+                        pages: incomingCap.pages || baseCap.pages, // Priorizar incoming (más reciente del índice)
+                        anchor: baseCap.anchor || incomingCap.anchor,
+                        articulos: mergedArts,
+                        articulos_sin_seccion: mergedArts,
+                        secciones: mergeSecciones(baseCap.secciones || [], incomingCap.secciones || [])
+                      }
+                    }
+                    // Si ninguno tiene contenido, mantener el base (no hacer nada)
+                  } else {
+                    baseMap.set(ord, result.length)
+                    result.push(incomingCap)
+                  }
+                })
+
+                return result
+              }
+
+              // Mergear secciones
+              const mergeSecciones = (baseSecs: any[], incomingSecs: any[]): any[] => {
+                const result = [...baseSecs]
+                const baseMap = new Map<string, number>()
+                baseSecs.forEach((s, idx) => {
+                  const ord = extractOrdinal(s.codigo_seccion || s.ordinal || '')
+                  if (ord && ord !== '?') baseMap.set(ord, idx)
+                })
+
+                incomingSecs.forEach((incomingSec: any) => {
+                  const ord = extractOrdinal(incomingSec.codigo_seccion || incomingSec.ordinal || '')
+                  if (!ord || ord === '?') {
+                    result.push(incomingSec)
+                    return
+                  }
+
+                  const baseIdx = baseMap.get(ord)
+                  if (baseIdx !== undefined) {
+                    const baseSec = result[baseIdx]
+                    result[baseIdx] = {
+                      ...baseSec,
+                      pagina_inicio_seccion: Math.min(
+                        baseSec.pagina_inicio_seccion || 9999,
+                        incomingSec.pagina_inicio_seccion || 9999
+                      ),
+                      // Mantener propiedades transformadas
+                      ordinal: baseSec.ordinal || ord,
+                      seccion_texto: baseSec.seccion_texto || incomingSec.seccion_texto || baseSec.subtitulo_seccion || incomingSec.subtitulo_seccion,
+                      pages: baseSec.pages || incomingSec.pages,
+                      anchor: baseSec.anchor || incomingSec.anchor,
+                      articulos: mergeArticulos(baseSec.articulos || [], incomingSec.articulos || [])
+                    }
+                  } else {
+                    baseMap.set(ord, result.length)
+                    result.push(incomingSec)
+                  }
+                })
+
+                return result
+              }
+
+              // Mergear artículos (evitar duplicados por número)
+              const mergeArticulos = (baseArts: any[], incomingArts: any[]): any[] => {
+                const result = [...baseArts]
+                const baseMap = new Map<string, number>()
+                baseArts.forEach((a, idx) => {
+                  const num = String(a.numero || '').trim().toLowerCase()
+                  if (num) baseMap.set(num, idx)
+                })
+
+                incomingArts.forEach((incomingArt: any) => {
+                  const num = String(incomingArt.numero || '').trim().toLowerCase()
+                  if (!num) {
+                    result.push(incomingArt)
+                    return
+                  }
+
+                  const baseIdx = baseMap.get(num)
+                  if (baseIdx !== undefined) {
+                    // Ya existe: mantener el que tiene mejor información
+                    const baseArt = result[baseIdx]
+                    if (!baseArt.articulo_texto && incomingArt.articulo_texto) {
+                      result[baseIdx] = incomingArt
+                    } else if (baseArt.articulo_texto && incomingArt.articulo_texto) {
+                      // Ambos tienen texto: mantener el que tiene página más temprana
+                      const basePage = baseArt.pages?.[0] || baseArt.pagina_articulo || 9999
+                      const incomingPage = incomingArt.pages?.[0] || incomingArt.pagina_articulo || 9999
+                      if (incomingPage < basePage) {
+                        result[baseIdx] = incomingArt
+                      }
+                    }
+                  } else {
+                    baseMap.set(num, result.length)
+                    result.push(incomingArt)
+                  }
+                })
+
+                return result
+              }
+
+              // Mergear disposiciones
+              const mergeDisposiciones = (base: any, incoming: any): any => {
+                const result: any = {
+                  adicionales: [...(base?.adicionales || [])],
+                  transitorias: [...(base?.transitorias || [])],
+                  derogatorias: [...(base?.derogatorias || [])],
+                  finales: [...(base?.finales || [])]
+                }
+
+                const mergeDisposList = (baseList: any[], incomingList: any[]): any[] => {
+                  const result = [...baseList]
+                  const baseMap = new Map<string, number>()
+                  baseList.forEach((d, idx) => {
+                    const num = String(d.numero || '').trim().toLowerCase()
+                    if (num) baseMap.set(num, idx)
+                  })
+
+                  incomingList.forEach((incomingDis: any) => {
+                    const num = String(incomingDis.numero || '').trim().toLowerCase()
+                    if (!num) {
+                      result.push(incomingDis)
+                      return
+                    }
+
+                    const baseIdx = baseMap.get(num)
+                    if (baseIdx === undefined) {
+                      baseMap.set(num, result.length)
+                      result.push(incomingDis)
+                    }
+                  })
+
+                  return result
+                }
+
+                if (incoming?.adicionales) result.adicionales = mergeDisposList(result.adicionales, incoming.adicionales)
+                if (incoming?.transitorias) result.transitorias = mergeDisposList(result.transitorias, incoming.transitorias)
+                if (incoming?.derogatorias) result.derogatorias = mergeDisposList(result.derogatorias, incoming.derogatorias)
+                if (incoming?.finales) result.finales = mergeDisposList(result.finales, incoming.finales)
+
+                return result
+              }
+
+              // Mergear front_matter preservando preambulo si está presente en cualquiera
+              const mergeFrontMatter = (base: any, incoming: any): any => {
+                const basePreambulo = base?.front_matter?.preambulo
+                const incomingPreambulo = incoming?.front_matter?.preambulo
+                const baseExposicion = base?.front_matter?.exposicion_motivos
+                const incomingExposicion = incoming?.front_matter?.exposicion_motivos
+
+                return {
+                  preambulo: (incomingPreambulo?.present || basePreambulo?.present) 
+                    ? (incomingPreambulo?.present ? incomingPreambulo : basePreambulo)
+                    : { present: false, anchor: null, pages: null },
+                  exposicion_motivos: (incomingExposicion?.present || baseExposicion?.present)
+                    ? (incomingExposicion?.present ? incomingExposicion : baseExposicion)
+                    : { present: false, anchor: null, pages: null }
+                }
+              }
+
+              return {
+                metadata: incoming.metadata || base.metadata,
+                front_matter: mergeFrontMatter(base, incoming),
+                titulos: mergeTitulos(base.titulos || [], incoming.titulos || []),
+                disposiciones: mergeDisposiciones(base.disposiciones, incoming.disposiciones)
+              }
+            }
+
+            schema = mergeOutlines(schema, data.outline as MentalOutline)
             setMentalOutline(schema)
             metadataSeed = schema.metadata || metadataSeed
+            
+            // Guardar el índice si viene en la respuesta (para pasarlo en chunks siguientes)
+            if (data.indice && typeof data.indice === 'string') {
+              indiceText = data.indice
+            }
 
             processedPages += chunk.length
             startIndex += chunk.length
@@ -868,8 +1380,8 @@ export default function GeneratePage() {
         </div>
       </section>
 
-      {/* Controles de resumen */}
-      <section className="mx-auto max-w-5xl px-3 py-3">
+      {/* Controles de resumen - OCULTO */}
+      {/* <section className="mx-auto max-w-5xl px-3 py-3">
         <div className="rounded-xl border border-slate-200 bg-white p-3 text-sm">
           <div className="flex flex-wrap items-end gap-2">
             <label className="text-xs">Tipo
@@ -902,7 +1414,7 @@ export default function GeneratePage() {
             </div>
           )}
         </div>
-      </section>
+      </section> */}
 
       <section ref={listRef} className="mx-auto max-w-5xl px-3 py-3">
         <div className="rounded-2xl border border-slate-200 p-3 bg-white">
@@ -1000,9 +1512,19 @@ export default function GeneratePage() {
       <section className="mx-auto max-w-5xl px-3 pb-6">
         <div className="rounded-xl border border-slate-200 p-3 text-sm space-y-3 bg-white text-slate-800">
           <div className="flex flex-wrap items-center gap-2">
-            <div className="font-medium text-sm">Esquema estructurado (IA)</div>
+            <div className="font-medium text-sm">Esquema estructurado</div>
             <div className="ml-auto flex flex-wrap gap-2">
               <button
+                type="button"
+                onClick={generateMentalOutlineDirect}
+                disabled={mentalOutlineLoading || !pagesFull.length}
+                className="h-9 px-3 rounded-lg bg-green-600 text-white text-sm disabled:opacity-50"
+                title="Genera el esquema mental directamente desde el índice del PDF sin usar IA"
+              >
+                {mentalOutlineLoading ? 'Generando…' : 'Generar'}
+              </button>
+              {/* Botones ocultos */}
+              {/* <button
                 type="button"
                 onClick={generateMentalOutlineSingle}
                 disabled={mentalOutlineLoading || !pagesFull.length}
@@ -1017,7 +1539,7 @@ export default function GeneratePage() {
                 className="h-9 px-3 rounded-lg bg-indigo-600 text-white text-sm disabled:opacity-50"
               >
                 {mentalOutlineLoading ? 'Generando…' : `Por lotes (hasta ${MENTAL_OUTLINE_CHUNK_SIZES[0]} pág.)`}
-              </button>
+              </button> */}
             </div>
           </div>
           {mentalOutlineProgress && (
@@ -1060,7 +1582,7 @@ export default function GeneratePage() {
                 </pre>
               ) : (
                 <div className="max-h-[70vh] overflow-y-auto pr-1">
-                  <OutlineTree outline={mentalOutline} />
+                  <OutlineTree outline={mentalOutline} pagesFull={pagesFull} />
                 </div>
               )}
             </div>
@@ -1073,4 +1595,7 @@ export default function GeneratePage() {
     </div>
   )
 }
+
+
+
 
