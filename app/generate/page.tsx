@@ -7,6 +7,7 @@ import MCQCard from '@/components/MCQCard'
 import DragDropUpload from '@/components/DragDropUpload'
 import Modal from '@/components/Modal'
 import { useLocalStorage } from '@/hooks/useLocalStorage'
+import LegalOutlineTree from '@/components/LegalOutlineTree'
 
 type Result = { isCorrect: boolean }
 
@@ -151,7 +152,165 @@ function normalizeDispositionHeading(prefix: string, item: DisposicionItem, numb
   return `Disposición ${prefix} ${number}`
 }
 
-function OutlineTree({ outline, pagesFull }: { outline: MentalOutline, pagesFull: { num: number, text: string }[] }) {
+// Componente para mostrar el detalle del artículo seleccionado
+function ArticleDetail({ art, idx, pagesFull, pagesFullRaw, frontMatterDropped, pagesCount }: { art: NonNullable<MentalOutline['titulos'][number]['articulos']>[number], idx: number, pagesFull: { num: number, text: string }[], pagesFullRaw?: { num: number, text: string }[], frontMatterDropped?: number[], pagesCount?: number | null }) {
+  const [resumen, setResumen] = useState<string | null>(null)
+  const [loading, setLoading] = useState(false)
+
+  useEffect(() => {
+    // Limpiar el resumen anterior y cargar el nuevo cuando cambia el artículo
+    setResumen(null)
+    setLoading(false)
+    
+    // Cargar el resumen del nuevo artículo
+    const loadArticleSummary = async () => {
+      setLoading(true)
+
+      try {
+        const numeroMatch = art.numero.match(/(\d+|[IVXLCDM]+|bis|ter)/i)
+        const articuloNumero = numeroMatch ? numeroMatch[1] : art.numero.replace(/Art[íi]culo\s+/i, '').trim()
+
+        let firstRealPage: number | null = null
+        const articuloPaginaReal = art.pagina_articulo || 0
+
+        if (articuloPaginaReal > pagesFull.length && pagesCount && pagesCount > pagesFull.length) {
+          if (pagesFullRaw && pagesFullRaw.length === pagesFull.length) {
+            firstRealPage = 1
+          } else {
+            const diff = (pagesFullRaw?.length || pagesFull.length) - pagesFull.length
+            firstRealPage = diff > 0 ? diff + 1 : 1
+          }
+        } else if (frontMatterDropped && frontMatterDropped.length > 0) {
+          const lastFrontMatterPage = Math.max(...frontMatterDropped)
+          firstRealPage = lastFrontMatterPage + 1
+        } else if (pagesCount && pagesCount > 0) {
+          if (pagesFullRaw && pagesFullRaw.length > 0) {
+            const firstRawPageNum = pagesFullRaw[0]?.num || 1
+            if (firstRawPageNum === 1 && pagesFullRaw.length < pagesCount) {
+              firstRealPage = 1
+            } else if (firstRawPageNum > 1) {
+              firstRealPage = firstRawPageNum
+            }
+          } else {
+            const firstFullPageNum = pagesFull[0]?.num || 1
+            if (firstFullPageNum === 1 && pagesFull.length < pagesCount) {
+              firstRealPage = 1
+            } else {
+              firstRealPage = firstFullPageNum
+            }
+          }
+        } else if (pagesFullRaw && pagesFullRaw.length > 0 && pagesFull.length > 0) {
+          const firstFullPageNum = pagesFull[0]?.num || 1
+          const firstRawPageNum = pagesFullRaw[0]?.num || 1
+
+          if (firstFullPageNum > 1) {
+            firstRealPage = firstFullPageNum
+          } else if (firstFullPageNum === 1 && firstRawPageNum === 1) {
+            let foundIndex = -1
+            const firstFullText = pagesFull[0]?.text?.substring(0, 100) || ''
+            if (firstFullText) {
+              foundIndex = pagesFullRaw.findIndex(p => {
+                const rawText = p.text?.substring(0, 100) || ''
+                return rawText === firstFullText || rawText.includes(firstFullText.substring(0, 50))
+              })
+            }
+            
+            if (foundIndex >= 0) {
+              firstRealPage = pagesFullRaw[foundIndex]?.num || (foundIndex + 1)
+            } else {
+              const frontMatterCount = pagesFullRaw.length - pagesFull.length
+              firstRealPage = frontMatterCount > 0 ? frontMatterCount + 1 : 1
+            }
+          } else {
+            firstRealPage = 1
+          }
+        }
+
+        const response = await fetch('/api/mental-outline/extract-article', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            pagesFull: pagesFull,
+            pagesFullRaw: pagesFullRaw && pagesFullRaw.length > 0 ? pagesFullRaw : null,
+            totalPagesPDF: pagesCount,
+            articuloNumero: articuloNumero,
+            articuloPagina: art.pagina_articulo,
+            firstRealPage: firstRealPage,
+            frontMatterDropped: (frontMatterDropped && frontMatterDropped.length > 0) ? frontMatterDropped : null
+          })
+        })
+
+        const data = await response.json()
+        if (!response.ok) {
+          throw new Error(data.error || `Error ${response.status}: ${response.statusText}`)
+        }
+
+        if (data.ok && data.resumen) {
+          setResumen(data.resumen)
+        } else if (data.ok && data.texto_completo) {
+          setResumen('Resumen no disponible.')
+        } else {
+          throw new Error(data.error || 'No se pudo generar el resumen.')
+        }
+      } catch (error: any) {
+        console.error('Error extrayendo resumen:', error)
+        setResumen(`Error: ${error.message || 'No se pudo generar el resumen.'}`)
+      } finally {
+        setLoading(false)
+      }
+    }
+    
+    loadArticleSummary()
+  }, [art.anchor])
+
+  const number = normalizeArticleNumber(art.numero, art.articulo_texto, idx)
+  const heading = normalizeArticleHeading(art.articulo_texto, number)
+
+  return (
+    <div className="rounded-xl border-2 border-slate-200 bg-gradient-to-br from-white to-slate-50/30 p-5 shadow-lg">
+      <div className="mb-5 pb-4 border-b-2 border-slate-200">
+        <div className="flex items-start gap-3">
+          <div className="flex-shrink-0 w-12 h-12 rounded-lg bg-indigo-100 flex items-center justify-center">
+            <span className="text-indigo-700 font-bold text-lg">{number}</span>
+          </div>
+          <div className="flex-1 min-w-0">
+            <h3 className="text-xl font-bold text-slate-900 mb-1">Artículo {number}</h3>
+            {heading && heading !== `Artículo ${number}` && (
+              <p className="text-base text-slate-700 font-medium leading-snug">{heading.replace(/^Artículo\s+\d+\.?\s*/i, '')}</p>
+            )}
+            {formatPages(art.pages) && (
+              <div className="mt-2 inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-full bg-slate-100 text-slate-600">
+                <span>📄</span>
+                <span>{formatPages(art.pages)}</span>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-4">
+        {loading ? (
+          <div className="flex items-center gap-3 text-sm text-slate-600">
+            <div className="animate-spin rounded-full h-5 w-5 border-2 border-indigo-600 border-t-transparent"></div>
+            <span className="italic">Generando resumen...</span>
+          </div>
+        ) : resumen ? (
+          <div className="prose prose-sm max-w-none">
+            <div className="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap bg-slate-50 rounded-lg p-4 border border-slate-200 shadow-inner">
+              {resumen}
+            </div>
+          </div>
+        ) : (
+          <div className="text-sm text-slate-500 italic p-4 bg-slate-50 rounded-lg border border-slate-200">
+            No hay resumen disponible.
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function OutlineTree({ outline, pagesFull, pagesFullRaw, frontMatterDropped, pagesCount, onArticleSelect, selectedArticleAnchor }: { outline: MentalOutline, pagesFull: { num: number, text: string }[], pagesFullRaw?: { num: number, text: string }[], frontMatterDropped?: number[], pagesCount?: number | null, onArticleSelect?: (art: NonNullable<MentalOutline['titulos'][number]['articulos']>[number], idx: number) => void, selectedArticleAnchor?: string | null }) {
   const pageTextMap = useMemo(() => {
     const map = new Map<number, string>()
     ;(pagesFull || []).forEach((p) => {
@@ -251,94 +410,63 @@ function OutlineTree({ outline, pagesFull }: { outline: MentalOutline, pagesFull
     }
     return [start]
   }
-  // Componente para artículo con resumen al hacer clic
-  const ArticuloCard = ({ art, idx, pagesFull }: { art: NonNullable<MentalOutline['titulos'][number]['articulos']>[number], idx: number, pagesFull: { num: number, text: string }[] }) => {
-    const [resumen, setResumen] = useState<string | null>(art.resumen || null)
-    const [loading, setLoading] = useState(false)
-    const [expanded, setExpanded] = useState(false)
+  // Componente simple para artículo en el árbol (solo navegación)
+  const ArticuloItem = ({ art, idx }: { art: NonNullable<MentalOutline['titulos'][number]['articulos']>[number], idx: number }) => {
+    const number = normalizeArticleNumber(art.numero, art.articulo_texto, idx)
+    const heading = normalizeArticleHeading(art.articulo_texto, number)
+    const isSelected = art.anchor === selectedArticleAnchor
+    const headingText = heading && heading !== `Artículo ${number}` ? heading.replace(/^Artículo\s+\d+\.?\s*/i, '') : null
 
-    const handleClick = async () => {
-      if (resumen) {
-        // Si ya tenemos el resumen, solo expandir/colapsar
-        setExpanded(!expanded)
-        return
-      }
-
-      if (loading) return
-
-      setLoading(true)
-      setExpanded(true)
-
-      try {
-        // Extraer número del artículo (puede ser "Artículo 1", "Artículo 11", etc.)
-        const numeroMatch = art.numero.match(/(\d+|[IVXLCDM]+|bis|ter)/i)
-        const articuloNumero = numeroMatch ? numeroMatch[1] : art.numero.replace(/Art[íi]culo\s+/i, '').trim()
-
-        const response = await fetch('/api/mental-outline/extract-article', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            pagesFull: pagesFull,
-            articuloNumero: articuloNumero,
-            articuloPagina: art.pagina_articulo
-          })
-        })
-
-        const data = await response.json()
-        if (!response.ok) {
-          throw new Error(data.error || `Error ${response.status}: ${response.statusText}`)
-        }
-
-        if (data.ok && data.resumen) {
-          setResumen(data.resumen)
-        } else if (data.ok && data.texto_completo) {
-          // Si hay texto pero no resumen, mostrar mensaje
-          setResumen('Resumen no disponible.')
-        } else {
-          throw new Error(data.error || 'No se pudo generar el resumen.')
-        }
-      } catch (error: any) {
-        console.error('Error extrayendo resumen:', error)
-        setResumen(`Error: ${error.message || 'No se pudo generar el resumen.'}`)
-      } finally {
-        setLoading(false)
+    const handleClick = () => {
+      if (onArticleSelect) {
+        onArticleSelect(art, idx)
       }
     }
 
-          const number = normalizeArticleNumber(art.numero, art.articulo_texto, idx)
-          const heading = normalizeArticleHeading(art.articulo_texto, number)
-
-          return (
-      <div 
-        key={art.anchor || `${number}-${idx}`} 
-        className="rounded-lg border border-slate-200 bg-slate-50 p-2 text-xs shadow-sm cursor-pointer hover:bg-slate-100 transition-colors"
-        onClick={handleClick}
-      >
-              <div className="font-semibold text-slate-700">Artículo {number}</div>
-              {heading && (
-                <div className="mt-1 text-slate-600">{heading}</div>
-              )}
-              {formatPages(art.pages) && <div className="mt-1 text-[11px] text-slate-500">{formatPages(art.pages)}</div>}
-        
-        {expanded && (
-          <div className="mt-2 pt-2 border-t border-slate-200">
-            {loading ? (
-              <div className="text-[11px] text-slate-500 italic">Generando resumen...</div>
-            ) : resumen ? (
-              <div className="text-[11px] text-slate-700 leading-relaxed">{resumen}</div>
-            ) : null}
+    return (
+      <div className="relative group/item">
+        <button
+          onClick={handleClick}
+          type="button"
+          aria-label={`Artículo ${number}${headingText ? `: ${headingText}` : ''}`}
+          className={`w-full text-left pl-1 pr-3 py-2 text-sm cursor-pointer rounded-md transition-all duration-200 flex items-center gap-1.5 ${
+            isSelected 
+              ? 'bg-indigo-100 text-indigo-900 font-medium shadow-sm border-l-4 border-indigo-500' 
+              : 'text-slate-700 hover:bg-slate-50 hover:border-l-4 hover:border-slate-300 border-l-4 border-transparent'
+          }`}
+        >
+          <span className={`flex-shrink-0 text-xs ${isSelected ? 'text-indigo-600' : 'text-slate-400 group-hover/item:text-slate-600'}`}>
+            {isSelected ? '●' : '○'}
+          </span>
+          <span className="font-semibold text-sm whitespace-nowrap min-w-[3.5rem]">Art. {number}</span>
+          {formatPages(art.pages) && (
+            <span className={`text-xs px-1.5 py-0.5 rounded flex-shrink-0 ${isSelected ? 'bg-indigo-200 text-indigo-700' : 'bg-slate-100 text-slate-600'}`}>
+              p. {formatPages(art.pages).replace(/^p\.\s*/, '')}
+            </span>
+          )}
+        </button>
+        {headingText && (
+          <div className="absolute left-0 top-full mt-1 z-50 hidden group-hover/item:block pointer-events-none">
+            <div className="bg-slate-900 text-white text-xs rounded-lg py-2 px-3 shadow-xl max-w-xs whitespace-normal">
+              {headingText}
+              <div className="absolute -top-1 left-4 w-2 h-2 bg-slate-900 rotate-45"></div>
+            </div>
           </div>
         )}
-            </div>
-          )
+      </div>
+    )
   }
 
   const renderArticulos = (articulos: MentalOutline['titulos'][number]['articulos']) => {
     if (!articulos?.length) return null
     return (
-      <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+      <div className="space-y-1 pl-1">
         {articulos.map((art, idx) => (
-          <ArticuloCard key={art.anchor || `art-${idx}`} art={art} idx={idx} pagesFull={pagesFull} />
+          <ArticuloItem 
+            key={art.anchor || `art-${idx}`} 
+            art={art} 
+            idx={idx}
+          />
         ))}
       </div>
     )
@@ -352,13 +480,14 @@ function OutlineTree({ outline, pagesFull }: { outline: MentalOutline, pagesFull
           const ordinal = resolveOrdinal('seccion', sec.ordinal, sec.seccion_texto, secIndex)
           const label = resolveLabel('seccion', sec.seccion_texto, ordinal)
           return (
-            <details key={sec.anchor || `${label}-${secIndex}`} open className="rounded-lg border border-slate-200 bg-white/80 p-2 pl-3 text-xs shadow-sm">
-              <summary className="flex cursor-pointer flex-wrap items-center gap-2 text-slate-700">
-                <span className="font-semibold uppercase">Sección {ordinal}</span>
+            <details key={sec.anchor || `${label}-${secIndex}`} open className="w-full rounded-lg border border-slate-200 bg-white/90 p-2.5 text-xs shadow-sm transition-all hover:shadow-md group/details">
+              <summary className="flex cursor-pointer flex-wrap items-center gap-2 text-slate-700 hover:text-slate-900 group [&::-webkit-details-marker]:hidden list-none">
+                <span className="text-slate-400 group-hover:text-slate-600 transition-transform duration-200 group-open/details:rotate-90 inline-block">▶</span>
+                <span className="font-semibold uppercase text-slate-800">Sección {ordinal}</span>
                 <span className="text-slate-600">{label}</span>
-                {formatPages(sec.pages) && <span className="ml-auto text-[11px] text-slate-500">{formatPages(sec.pages)}</span>}
+                {formatPages(sec.pages) && <span className="ml-auto text-[11px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">{formatPages(sec.pages)}</span>}
               </summary>
-              <div className="mt-2 space-y-2 border-l border-slate-200 pl-3">
+              <div className="mt-2 space-y-1 border-l-2 border-slate-200 pl-3 ml-1">
                 {renderArticulos(sec.articulos)}
               </div>
             </details>
@@ -376,13 +505,14 @@ function OutlineTree({ outline, pagesFull }: { outline: MentalOutline, pagesFull
           const ordinal = resolveOrdinal('capitulo', cap.ordinal, cap.capitulo_texto, capIndex)
           const label = resolveLabel('capitulo', cap.capitulo_texto, ordinal)
           return (
-            <details key={cap.anchor || `${label}-${capIndex}`} open className="rounded-xl border border-slate-200 bg-white p-3 text-xs shadow-sm">
-              <summary className="flex cursor-pointer flex-wrap items-center gap-2 text-slate-700">
-                <span className="font-semibold uppercase">Capítulo {ordinal}</span>
+            <details key={cap.anchor || `${label}-${capIndex}`} open className="w-full rounded-xl border border-slate-200 bg-white p-3.5 text-xs shadow-sm transition-all hover:shadow-md group/details">
+              <summary className="flex cursor-pointer flex-wrap items-center gap-2 text-slate-700 hover:text-slate-900 group [&::-webkit-details-marker]:hidden list-none">
+                <span className="text-slate-400 group-hover:text-slate-600 transition-transform duration-200 group-open/details:rotate-90 inline-block">▶</span>
+                <span className="font-semibold uppercase text-slate-800">Capítulo {ordinal}</span>
                 <span className="text-slate-600">{label}</span>
-                {formatPages(cap.pages) && <span className="ml-auto text-[11px] text-slate-500">{formatPages(cap.pages)}</span>}
+                {formatPages(cap.pages) && <span className="ml-auto text-[11px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">{formatPages(cap.pages)}</span>}
               </summary>
-              <div className="mt-3 space-y-3 border-l-2 border-slate-100 pl-4">
+              <div className="mt-3 space-y-3 border-l-2 border-slate-200 pl-4 ml-1">
                 {renderSecciones(cap.secciones)}
                 {renderArticulos(cap.articulos)}
               </div>
@@ -442,15 +572,16 @@ function OutlineTree({ outline, pagesFull }: { outline: MentalOutline, pagesFull
       return startFromScan ? [startFromScan] : []
     })()
     return (
-      <details key={titulo.anchor || `titulo-${ordinal}-${index}`} open className="rounded-2xl border border-slate-200 bg-white p-3 text-sm shadow-sm transition-all">
-        <summary className="flex cursor-pointer flex-wrap items-center gap-2 text-slate-800">
-          <span className="rounded-lg bg-indigo-100 px-2 py-0.5 text-xs font-semibold uppercase tracking-wide text-indigo-700">
+      <details key={titulo.anchor || `titulo-${ordinal}-${index}`} open className="rounded-2xl border-2 border-slate-200 bg-gradient-to-br from-white to-slate-50/50 p-4 text-sm shadow-md transition-all hover:shadow-lg hover:border-indigo-300 group/details">
+        <summary className="flex cursor-pointer flex-wrap items-center gap-2 text-slate-800 hover:text-slate-900 group [&::-webkit-details-marker]:hidden list-none">
+          <span className="text-indigo-400 group-hover:text-indigo-600 transition-transform duration-200 text-lg group-open/details:rotate-90 inline-block">▶</span>
+          <span className="rounded-lg bg-indigo-100 px-3 py-1 text-xs font-bold uppercase tracking-wide text-indigo-700 shadow-sm">
             Título {ordinal}
           </span>
-          {definition && <span>{definition}</span>}
-          {formatPages(displayRange) && <span className="ml-auto text-xs text-slate-500">{formatPages(displayRange)}</span>}
+          {definition && <span className="font-medium text-slate-700">{definition}</span>}
+          {formatPages(displayRange) && <span className="ml-auto text-xs px-2 py-1 rounded bg-indigo-50 text-indigo-700 font-medium">{formatPages(displayRange)}</span>}
         </summary>
-        <div className="mt-3 space-y-3 border-l-2 border-indigo-100/70 pl-4">
+        <div className="mt-4 space-y-3 border-l-3 border-indigo-200 pl-5 ml-1">
           {renderCapitulos(titulo.capitulos)}
           {renderArticulos(titulo.articulos)}
         </div>
@@ -505,6 +636,7 @@ export default function GeneratePage() {
   const [blocks, setBlocks] = useState<any[]>([])
   const [pagesFull, setPagesFull] = useState<any[]>([])
   const [pagesFullRaw, setPagesFullRaw] = useState<any[]>([]) // Páginas completas incluyendo front matter (para buscar índice)
+  const [frontMatterDropped, setFrontMatterDropped] = useState<number[]>([]) // Páginas de front matter que se filtraron
   const [pdfSchema, setPdfSchema] = useState<string | null>(null)
   const [fileHash, setFileHash] = useState<string | null>(null)
   const [pagesCount, setPagesCount] = useState<number | null>(null)
@@ -542,6 +674,10 @@ export default function GeneratePage() {
   const [mentalOutlineError, setMentalOutlineError] = useState<string | null>(null)
   const [mentalOutlineProgress, setMentalOutlineProgress] = useState<OutlineProgress | null>(null)
   const [outlineViewMode, setOutlineViewMode] = useState<'tree' | 'json'>('tree')
+  const [selectedArticle, setSelectedArticle] = useState<{
+    art: NonNullable<MentalOutline['titulos'][number]['articulos']>[number]
+    idx: number
+  } | null>(null)
 
   // Paginación
   const PAGE_SIZE = 5
@@ -555,6 +691,7 @@ export default function GeneratePage() {
   useEffect(() => {
     if (mentalOutline) {
       setOutlineViewMode('tree')
+      setSelectedArticle(null) // Limpiar el artículo seleccionado cuando cambia el esquema mental
     }
   }, [mentalOutline])
   const unansweredVisible = useMemo(
@@ -657,15 +794,28 @@ export default function GeneratePage() {
       const res = await fetch('/api/upload', { method: 'POST', body: fd })
       if (!res.ok) throw new Error('Fallo en /api/upload')
       const data = await res.json()
-      setPagesCount(typeof data?.pages === 'number' ? data.pages : data?.meta?.numPages ?? null)
+      const totalPagesFromPDF = typeof data?.pages === 'number' ? data.pages : data?.meta?.numPages ?? null
+      setPagesCount(totalPagesFromPDF)
       setBlocks(data.blocks || [])
       setPagesFull(data.pagesFull || [])
-      setPagesFullRaw(data.pagesFullRaw || data.pagesFull || []) // Guardar páginas completas para buscar índice
+      const pagesFullRawReceived = data.pagesFullRaw || data.pagesFull || []
+      setPagesFullRaw(pagesFullRawReceived) // Guardar páginas completas para buscar índice
+      const frontMatter = Array.isArray(data?.frontMatterDropped) ? data.frontMatterDropped : []
+      setFrontMatterDropped(frontMatter) // Guardar páginas de front matter
+      console.log('[Upload] PDF recibido:', {
+        totalPagesFromPDF: totalPagesFromPDF,
+        frontMatterDropped: data?.frontMatterDropped,
+        frontMatter,
+        pagesFullLength: (data.pagesFull || []).length,
+        pagesFullRawLength: pagesFullRawReceived.length,
+        note: pagesFullRawReceived.length < (totalPagesFromPDF || 0) ? 'ALERTA: pagesFullRaw tiene menos páginas que el total del PDF' : 'OK'
+      })
       setPdfSchema(data.pdfSchema || null)
       setFileHash(data?.meta?.fileHash || null)
       setLastMetaInfo(data?.meta?.info || null)
       setMentalOutline(null)
       setMentalOutlineError(null)
+      setSelectedArticle(null) // Limpiar el artículo seleccionado al cargar un nuevo PDF
       if (!userEditedLawName) {
         const auto = deriveLawName(data?.meta?.info, pdfFile)
         if (auto) setLawName(auto)
@@ -1250,6 +1400,7 @@ export default function GeneratePage() {
                 current={pdfFile}
                 onSelect={(f) => {
                   setPdfFile(f)
+                  setSelectedArticle(null) // Limpiar el artículo seleccionado al seleccionar un nuevo archivo
                   if (f && !userEditedLawName && !lawName.trim()) setLawName(f.name.replace(/\.[^.]+$/, ''))
                 }}
               />
@@ -1581,8 +1732,60 @@ export default function GeneratePage() {
 {JSON.stringify(mentalOutline, null, 2)}
                 </pre>
               ) : (
-                <div className="max-h-[70vh] overflow-y-auto pr-1">
-                  <OutlineTree outline={mentalOutline} pagesFull={pagesFull} />
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <h2 className="text-sm font-bold text-slate-700 uppercase tracking-wide">Esquema estructurado</h2>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const url = window.location.href.split('?')[0]
+                        window.open(url, '_blank', 'width=1600,height=1000')
+                      }}
+                      className="text-xs px-3 py-1.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 transition-colors"
+                      title="Abrir esquema en nueva pestaña para mejor visualización"
+                    >
+                      🔗 Abrir en nueva pestaña
+                    </button>
+                  </div>
+                  <div className="flex flex-col lg:flex-row gap-6">
+                    {/* Columna izquierda: Árbol plegable */}
+                    <div className="w-full lg:w-80 lg:min-w-[280px] lg:max-w-[320px] flex-shrink-0">
+                      <div className="sticky top-0 bg-white z-10 pb-3 mb-3 border-b border-slate-200">
+                        <h3 className="text-sm font-bold text-slate-700 uppercase tracking-wide">Índice</h3>
+                      </div>
+                      <div className="max-h-[70vh] overflow-y-auto pr-2 scrollbar-thin scrollbar-thumb-slate-300 scrollbar-track-slate-100">
+                        <LegalOutlineTree 
+                          outline={mentalOutline} 
+                          onArticleSelect={(art, idx) => setSelectedArticle({ art, idx })}
+                          selectedArticleAnchor={selectedArticle?.art.anchor || null}
+                        />
+                      </div>
+                    </div>
+                    
+                    {/* Columna derecha: Detalle del artículo */}
+                    <div className="flex-1 min-w-0">
+                      <div className="max-h-[70vh] overflow-y-auto scrollbar-thin scrollbar-thumb-slate-300 scrollbar-track-slate-100">
+                        {selectedArticle ? (
+                          <ArticleDetail 
+                            art={selectedArticle.art}
+                            idx={selectedArticle.idx}
+                            pagesFull={pagesFull}
+                            pagesFullRaw={pagesFullRaw}
+                            frontMatterDropped={frontMatterDropped}
+                            pagesCount={pagesCount}
+                          />
+                        ) : (
+                          <div className="flex flex-col items-center justify-center h-full min-h-[400px] text-center p-8 bg-gradient-to-br from-slate-50 to-white rounded-xl border-2 border-dashed border-slate-300">
+                            <div className="text-5xl mb-4">📄</div>
+                            <h3 className="text-lg font-semibold text-slate-700 mb-2">Selecciona un artículo</h3>
+                            <p className="text-sm text-slate-500 max-w-sm">
+                              Haz clic en cualquier artículo del índice para ver su contenido y resumen aquí
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
                 </div>
               )}
             </div>

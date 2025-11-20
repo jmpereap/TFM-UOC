@@ -4,6 +4,7 @@ import { splitIntoBlocks } from 'lib/pdf/splitIntoBlocks'
 import { parsePdf } from 'lib/pdf/parsePdf'
 import { detectFrontMatter, defaultFrontmatterConfig } from '@/lib/legal/frontmatter'
 import { computeAllStats } from '@/lib/utils/pageStats'
+import { extractBookmarks } from 'lib/pdf/extractBookmarks'
 
 export const runtime = 'nodejs'
 
@@ -35,6 +36,27 @@ export async function POST(req: NextRequest) {
     const parsed = await parsePdf(buffer)
     const metaInfo = (parsed.info as any) || {}
     const pages = parsed.pages || []
+    
+    // Extraer bookmarks/marcadores del PDF
+    const bookmarks = await extractBookmarks(buffer)
+    
+    // Logging para debug: verificar cuántas páginas se parsearon
+    console.log('[Upload] PDF parseado:', {
+      totalPagesFromMeta: parsed.numPages,
+      pagesParsed: pages.length,
+      note: pages.length < parsed.numPages ? 'ALERTA: Se parsearon menos páginas de las que indica el PDF' : 'OK'
+    })
+    
+    // IMPORTANTE: Asegurar que tenemos todas las páginas del PDF
+    // Si pages.length < parsed.numPages, hay un problema con el parser
+    if (pages.length < parsed.numPages) {
+      console.error('[Upload] ERROR: El PDF tiene', parsed.numPages, 'páginas pero solo se parsearon', pages.length)
+      // Rellenar con páginas vacías si faltan
+      while (pages.length < parsed.numPages) {
+        pages.push('')
+      }
+    }
+    
     const pagesFullRaw = pages.map((text, idx) => ({ num: idx + 1, text: normalizePageText(text) }))
     const frontCfg = defaultFrontmatterConfig()
     const frontMatter = detectFrontMatter(pagesFullRaw, frontCfg)
@@ -57,6 +79,7 @@ export async function POST(req: NextRequest) {
       meta: { numPages: parsed.numPages, info: metaInfo, blockSize, overlap, fileHash },
       frontMatterDropped: Array.from(frontMatter),
       pageStats,
+      bookmarks, // Marcadores/bookmarks del PDF
     })
   } catch (err) {
     console.error(err)
