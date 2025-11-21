@@ -259,13 +259,66 @@ export async function POST(req: NextRequest) {
   try {
     const payload = await req.json()
     
-    // PASO 1: Usar el PDF completo (índice incluido) - pagesFullRaw
+    // PASO 1: Determinar el origen y qué páginas usar
+    // - Si viene desde bookmarks: usar pagesFull directamente (números de página de los bookmarks)
+    // - Si viene desde método directo: usar pagesFullRaw y extraer números del pie de página
+    const pagesFull = Array.isArray(payload?.pagesFull) ? payload.pagesFull : []
     const pagesFullRaw = Array.isArray(payload?.pagesFullRaw) ? payload.pagesFullRaw : []
+    const sourceFromBookmarks = typeof payload?.sourceFromBookmarks === 'boolean' ? payload.sourceFromBookmarks : false
     
-    if (!pagesFullRaw.length) {
+    // Determinar qué páginas usar y si extraer del pie de página
+    let sourcePages: any[] = []
+    let extractFromFooter = true // Por defecto, extraer del pie de página (método directo)
+    
+    if (sourceFromBookmarks && pagesFull.length > 0) {
+      // Desde bookmarks: usar pagesFull directamente (ya tiene los números correctos de los bookmarks)
+      sourcePages = pagesFull
+      extractFromFooter = false
+      logEvent('mentalOutline.article.extract.source', {
+        source: 'bookmarks',
+        pagesCount: sourcePages.length,
+        note: 'Usando pagesFull directamente desde bookmarks'
+      })
+    } else if (pagesFullRaw.length > 0) {
+      // Método directo: usar pagesFullRaw y extraer números del pie de página
+      sourcePages = pagesFullRaw
+      extractFromFooter = true
+      logEvent('mentalOutline.article.extract.source', {
+        source: 'direct',
+        pagesCount: sourcePages.length,
+        note: 'Usando pagesFullRaw y extrayendo números del pie de página'
+      })
+    } else if (pagesFull.length > 0) {
+      // Fallback: si solo hay pagesFull, usarlo pero intentar extraer del pie si es necesario
+      sourcePages = pagesFull
+      // Verificar si los números de página parecen válidos (no todos son 1, 2, 3... secuenciales desde 1)
+      const pageNumbers = pagesFull.map((p: any) => typeof p?.num === 'number' ? p.num : 0).filter(n => n > 0)
+      const isSequential = pageNumbers.length > 0 && pageNumbers.every((n, i) => n === i + 1)
+      
+      if (isSequential && pageNumbers.length === pagesFull.length) {
+        // Si son secuenciales desde 1, probablemente son índices, no números reales de página
+        // Intentar extraer del pie de página
+        extractFromFooter = true
+        logEvent('mentalOutline.article.extract.source', {
+          source: 'fallback_with_extraction',
+          pagesCount: sourcePages.length,
+          note: 'pagesFull tiene números secuenciales, extrayendo del pie de página'
+        })
+      } else {
+        // Si no son secuenciales, probablemente son números reales de página
+        extractFromFooter = false
+        logEvent('mentalOutline.article.extract.source', {
+          source: 'fallback_direct',
+          pagesCount: sourcePages.length,
+          note: 'pagesFull tiene números de página válidos, usándolos directamente'
+        })
+      }
+    }
+    
+    if (!sourcePages.length) {
       return NextResponse.json({ 
         ok: false, 
-        error: `pagesFullRaw requerido (PDF completo). Recibido: ${Array.isArray(payload?.pagesFullRaw) ? 'array vacío' : 'no array'}` 
+        error: `pagesFullRaw o pagesFull requerido (PDF completo). Recibido: pagesFullRaw=${pagesFullRaw.length}, pagesFull=${pagesFull.length}` 
       }, { status: 400 })
     }
     
@@ -280,14 +333,22 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: false, error: `articuloPagina requerido y debe ser > 0` }, { status: 400 })
     }
     
-    // PASO 2: Normalizar las páginas y extraer el número de página del pie de página
-    // Los PDFs tienen números de página en el pie de página, necesitamos extraerlos
-    const normalizedPages: PageEntry[] = pagesFullRaw.map((entry: any, idx: number) => {
+    // PASO 2: Normalizar las páginas
+    // Si extractFromFooter = false: usar números de página directamente (desde bookmarks)
+    // Si extractFromFooter = true: extraer números del pie de página (método directo)
+    const normalizedPages: PageEntry[] = sourcePages.map((entry: any, idx: number) => {
       const text = typeof entry?.text === 'string' ? entry.text : ''
       let pageNum = typeof entry?.num === 'number' ? entry.num : idx + 1
       
-      // Buscar el número de página en el pie de página
-      // Los números de página suelen estar al final de la página
+      // Si NO debemos extraer del pie de página, usar el número directamente
+      if (!extractFromFooter) {
+        return {
+          num: pageNum,
+          text: text,
+        }
+      }
+      
+      // Si debemos extraer del pie de página (método directo)
       const lines = text.split(/\r?\n/).filter(l => l.trim().length > 0)
       const lastLines = lines.slice(-10).join('\n') // Últimas 10 líneas no vacías
       
@@ -296,9 +357,10 @@ export async function POST(req: NextRequest) {
       for (let i = lines.length - 1; i >= Math.max(0, lines.length - 10); i--) {
         const line = lines[i].trim()
         // Si la línea contiene solo un número (posible número de página)
-        if (/^\d{1,4}$/.test(line)) {
+        // IMPORTANTE: Filtrar números que parecen años (4 dígitos > 2000) o muy grandes
+        if (/^\d{1,3}$/.test(line)) { // Solo números de 1-3 dígitos (páginas normales)
           const foundPageNum = parseInt(line, 10)
-          if (foundPageNum > 0 && foundPageNum < 10000) {
+          if (foundPageNum > 0 && foundPageNum < 1000) { // Filtrar números grandes
             pageNum = foundPageNum
             break
           }
@@ -309,15 +371,13 @@ export async function POST(req: NextRequest) {
       if (pageNum === (typeof entry?.num === 'number' ? entry.num : idx + 1)) {
         const footerPatterns = [
           // "página X" o "pág. X"
-          /p[áa]g\.?\s*(\d{1,4})/i,
+          /p[áa]g\.?\s*(\d{1,3})/i, // Solo 1-3 dígitos
           // "página X" completo
-          /p[áa]gina\s+(\d{1,4})/i,
+          /p[áa]gina\s+(\d{1,3})/i, // Solo 1-3 dígitos
           // "p. X"
-          /p\.\s*(\d{1,4})/i,
-          // "X / Y" (página X de Y)
-          /(\d{1,4})\s*\/\s*\d+/,
-          // Número al final de una línea (sin contexto)
-          /(\d{1,4})\s*$/m,
+          /p\.\s*(\d{1,3})/i, // Solo 1-3 dígitos
+          // "X / Y" (página X de Y) - solo si X < 1000
+          /(\d{1,3})\s*\/\s*\d+/,
         ]
         
         for (const pattern of footerPatterns) {
@@ -325,7 +385,8 @@ export async function POST(req: NextRequest) {
           for (const match of matches) {
             if (match[1]) {
               const foundPageNum = parseInt(match[1], 10)
-              if (foundPageNum > 0 && foundPageNum < 10000) {
+              // Filtrar números que parecen años o muy grandes
+              if (foundPageNum > 0 && foundPageNum < 1000) {
                 pageNum = foundPageNum
                 break
               }
@@ -464,15 +525,27 @@ export async function POST(req: NextRequest) {
       textoFinal: extractedData.texto_articulo.substring(Math.max(0, extractedData.texto_articulo.length - 200)) // Últimos 200 caracteres
     })
 
-    const rubricaArticulo = extractedData.rubrica_articulo || ''
-    const textoCompleto = extractedData.texto_articulo || ''
+    let rubricaArticulo = extractedData.rubrica_articulo || ''
+    let textoCompleto = extractedData.texto_articulo || ''
     const numeroArticulo = extractedData.numero_articulo || articuloNumero
 
-    if (!textoCompleto || textoCompleto.trim().length < 20) {
-      return NextResponse.json({ 
-        ok: false, 
-        error: 'El artículo encontrado no tiene suficiente contenido' 
-      }, { status: 400 })
+    // Si el texto está vacío pero hay rúbrica, usar la rúbrica como texto
+    if (!textoCompleto || textoCompleto.trim().length === 0) {
+      if (rubricaArticulo && rubricaArticulo.trim().length > 0) {
+        // Si solo hay rúbrica, usar la rúbrica como texto completo
+        textoCompleto = rubricaArticulo
+        logEvent('mentalOutline.article.extract.only_rubrica', {
+          articulo: articuloNumero,
+          rubrica: rubricaArticulo,
+          note: 'Artículo solo tiene rúbrica, usando rúbrica como texto completo'
+        })
+      } else {
+        // Si no hay ni texto ni rúbrica, devolver error
+        return NextResponse.json({ 
+          ok: false, 
+          error: 'El artículo encontrado no tiene contenido' 
+        }, { status: 400 })
+      }
     }
 
     // Determinar las páginas usadas
@@ -480,42 +553,82 @@ export async function POST(req: NextRequest) {
 
     // Generar resumen
     let resumen = ''
-    try {
-      // Validar que el texto del artículo sea válido antes de generar resumen
-      const textoParaResumen = textoCompleto.trim()
-      
-      // Logging del texto completo del artículo
-      logEvent('mentalOutline.article.extract.before_summary', {
-        articulo: articuloNumero,
-        textoLength: textoParaResumen.length,
-        textoCompleto: textoParaResumen, // Texto completo del artículo en el log
-        textoPreview: textoParaResumen.substring(0, 500),
-        hasContent: textoParaResumen.length > 50
-      })
-      
-      // Usar IA para generar el resumen
-      resumen = await generateArticleSummaryWithAI(textoParaResumen, rubricaArticulo, numeroArticulo)
-      
-      logEvent('mentalOutline.article.extract.after_summary', {
-        articulo: articuloNumero,
-        resumenLength: resumen.length,
-        resumenPreview: resumen.substring(0, 300)
-      })
-      
-      // Validar y limpiar el resumen
-      if (resumen) {
-        resumen = resumen.replace(/\s+/g, ' ').trim()
-        if (resumen.length < 20 || !/[a-zA-ZáéíóúüñÁÉÍÓÚÜÑ]/.test(resumen)) {
+    let useFullTextAsSummary = false
+    
+    // Si el texto es muy corto, usar el texto completo directamente
+    if (textoCompleto.trim().length < 20) {
+      // Si el texto es muy corto, usar el texto completo directamente
+      useFullTextAsSummary = true
+      resumen = textoCompleto.trim()
+    } else {
+      try {
+        // Validar que el texto del artículo sea válido antes de generar resumen
+        const textoParaResumen = textoCompleto.trim()
+        
+        // Logging del texto completo del artículo
+        logEvent('mentalOutline.article.extract.before_summary', {
+          articulo: articuloNumero,
+          textoLength: textoParaResumen.length,
+          textoCompleto: textoParaResumen, // Texto completo del artículo en el log
+          textoPreview: textoParaResumen.substring(0, 500),
+          hasContent: textoParaResumen.length > 50
+        })
+        
+        // Usar IA para generar el resumen
+        resumen = await generateArticleSummaryWithAI(textoParaResumen, rubricaArticulo, numeroArticulo)
+        
+        logEvent('mentalOutline.article.extract.after_summary', {
+          articulo: articuloNumero,
+          resumenLength: resumen.length,
+          resumenPreview: resumen.substring(0, 300)
+        })
+        
+        // Validar y limpiar el resumen
+        if (resumen) {
+          resumen = resumen.replace(/\s+/g, ' ').trim()
+          if (resumen.length < 20 || !/[a-zA-ZáéíóúüñÁÉÍÓÚÜÑ]/.test(resumen)) {
+            resumen = ''
+          }
+        }
+      } catch (error: any) {
+        logEvent('mentalOutline.article.summary.error', {
+          articulo: articuloNumero,
+          pagina: articuloPagina,
+          error: error.message || String(error),
+        })
+        
+        // Si el error menciona "no tiene suficiente contenido" o similar, usar el texto completo
+        const errorMessage = error.message || String(error) || ''
+        if (errorMessage.includes('no tiene suficiente contenido') || 
+            errorMessage.includes('insufficient content') ||
+            errorMessage.includes('suficiente contenido')) {
+          useFullTextAsSummary = true
+          resumen = textoCompleto.trim()
+          logEvent('mentalOutline.article.summary.using_full_text', {
+            articulo: articuloNumero,
+            reason: 'Error de IA sobre contenido insuficiente',
+            textoLength: textoCompleto.length
+          })
+        } else {
           resumen = ''
         }
       }
-    } catch (error: any) {
-      logEvent('mentalOutline.article.summary.error', {
+    }
+    
+    // Si el resumen está vacío pero hay texto completo, usar el texto completo como resumen
+    if (!resumen && textoCompleto && textoCompleto.trim().length > 0) {
+      useFullTextAsSummary = true
+      resumen = textoCompleto.trim()
+      logEvent('mentalOutline.article.summary.using_full_text', {
         articulo: articuloNumero,
-        pagina: articuloPagina,
-        error: error.message || String(error),
+        reason: 'Resumen vacío, usando texto completo',
+        textoLength: textoCompleto.length
       })
-      resumen = ''
+    }
+
+    // Asegurarse de que siempre haya un resumen si hay texto completo
+    if (!resumen && textoCompleto && textoCompleto.trim().length > 0) {
+      resumen = textoCompleto.trim()
     }
 
     return NextResponse.json({
@@ -523,7 +636,7 @@ export async function POST(req: NextRequest) {
       numero_articulo: numeroArticulo,
       rubrica_articulo: rubricaArticulo,
       texto_completo: textoCompleto,
-      resumen: resumen || null,
+      resumen: resumen || textoCompleto || null, // Si no hay resumen, usar texto completo
       paginas: paginas,
     })
   } catch (error: any) {

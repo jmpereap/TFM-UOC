@@ -1,4 +1,5 @@
 import OpenAI from 'openai'
+import { logEvent } from '@/lib/logging/logger'
 
 // Cliente compatible con Edge y Node (usa fetch por defecto)
 const client = new OpenAI({
@@ -11,6 +12,7 @@ export type MCQItem = {
   opciones: { A: string; B: string; C: string; D: string }
   correcta: 'A' | 'B' | 'C' | 'D'
   justificacion: string
+  difficulty: 'basico' | 'medio' | 'avanzado'
   referencia: { ley: string; paginas: string; articulo?: string; parrafo?: string }
 }
 
@@ -35,6 +37,7 @@ const questionSchema = {
         },
         correcta: { type: 'string', enum: ['A', 'B', 'C', 'D'] },
         justificacion: { type: 'string' },
+        difficulty: { type: 'string', enum: ['basico', 'medio', 'avanzado'] },
         referencia: {
           type: 'object',
           properties: {
@@ -47,7 +50,7 @@ const questionSchema = {
           additionalProperties: true,
         },
       },
-      required: ['pregunta', 'opciones', 'correcta', 'justificacion', 'referencia'],
+      required: ['pregunta', 'opciones', 'correcta', 'justificacion', 'difficulty', 'referencia'],
       additionalProperties: false,
     },
   },
@@ -89,6 +92,16 @@ export async function callModel(prompt: string, timeoutMs = 20000): Promise<MCQI
     )
     const txt = res.choices[0]?.message?.content || '[]'
     const arr = extractJsonArray(txt)
+    // Función para normalizar y validar difficulty
+    const normalizeDifficulty = (difficulty: any): 'basico' | 'medio' | 'avanzado' => {
+      const d = String(difficulty || '').toLowerCase().trim()
+      if (d === 'basico' || d === 'básico' || d === 'basico' || d === 'basic') return 'basico'
+      if (d === 'medio' || d === 'medium' || d === 'intermedio') return 'medio'
+      if (d === 'avanzado' || d === 'advanced' || d === 'avanzado') return 'avanzado'
+      // Por defecto, si no se puede determinar, usar 'medio'
+      return 'medio'
+    }
+
     const items: MCQItem[] = arr.map((x: any) => ({
       pregunta: String(x?.pregunta || ''),
       opciones: {
@@ -99,6 +112,7 @@ export async function callModel(prompt: string, timeoutMs = 20000): Promise<MCQI
       },
       correcta: (String(x?.correcta || 'A') as 'A' | 'B' | 'C' | 'D'),
       justificacion: String(x?.justificacion || ''),
+      difficulty: normalizeDifficulty(x?.difficulty),
       referencia: {
         ley: String(x?.referencia?.ley || ''),
         paginas: String(x?.referencia?.paginas || ''),
@@ -112,10 +126,20 @@ export async function callModel(prompt: string, timeoutMs = 20000): Promise<MCQI
   }
 }
 
-export async function callModelJSON(prompt: string, timeoutMs = 20000, maxTokens = 500): Promise<any> {
+export async function callModelJSON(
+  prompt: string,
+  timeoutMs = 20000,
+  maxTokens = 500,
+  meta?: Record<string, unknown>,
+): Promise<any> {
   const ctrl = new AbortController()
   const to = setTimeout(() => ctrl.abort(), timeoutMs)
   try {
+    logEvent('ai.call.json', {
+      meta,
+      prompt_preview: prompt.slice(0, 1200),
+      prompt_length: prompt.length,
+    })
     const res = await client.chat.completions.create(
       {
         model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
@@ -131,7 +155,52 @@ export async function callModelJSON(prompt: string, timeoutMs = 20000, maxTokens
       { signal: ctrl.signal } as any,
     )
     const txt = res.choices[0]?.message?.content || '{}'
-    return JSON.parse(txt)
+    logEvent('ai.response.json', {
+      meta,
+      response_preview: txt.slice(0, 1200),
+      response_length: txt.length,
+    })
+    
+    // Intentar parsear el JSON
+    try {
+      return JSON.parse(txt)
+    } catch (parseError: any) {
+      // Si el JSON está incompleto, intentar repararlo básicamente
+      if (parseError.message && parseError.message.includes('Unterminated')) {
+        logEvent('ai.response.json.incomplete', {
+          meta,
+          error: parseError.message,
+          response_length: txt.length,
+          response_preview: txt.slice(-500) // Últimos 500 caracteres para debug
+        })
+        // Intentar cerrar strings y objetos incompletos
+        let repaired = txt
+        // Cerrar strings abiertos
+        const openQuotes = (repaired.match(/"/g) || []).length
+        if (openQuotes % 2 !== 0) {
+          repaired += '"'
+        }
+        // Cerrar objetos y arrays
+        const openBraces = (repaired.match(/{/g) || []).length
+        const closeBraces = (repaired.match(/}/g) || []).length
+        for (let i = 0; i < openBraces - closeBraces; i++) {
+          repaired += '}'
+        }
+        const openBrackets = (repaired.match(/\[/g) || []).length
+        const closeBrackets = (repaired.match(/\]/g) || []).length
+        for (let i = 0; i < openBrackets - closeBrackets; i++) {
+          repaired += ']'
+        }
+        
+        try {
+          return JSON.parse(repaired)
+        } catch (repairedError: any) {
+          // Si aún falla, lanzar el error original
+          throw new Error(`JSON parse error: ${parseError.message}. Response length: ${txt.length}. Last 200 chars: ${txt.slice(-200)}`)
+        }
+      }
+      throw parseError
+    }
   } finally {
     clearTimeout(to)
   }

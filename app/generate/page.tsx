@@ -153,7 +153,7 @@ function normalizeDispositionHeading(prefix: string, item: DisposicionItem, numb
 }
 
 // Componente para mostrar el detalle del artículo seleccionado
-function ArticleDetail({ art, idx, pagesFull, pagesFullRaw, frontMatterDropped, pagesCount }: { art: NonNullable<MentalOutline['titulos'][number]['articulos']>[number], idx: number, pagesFull: { num: number, text: string }[], pagesFullRaw?: { num: number, text: string }[], frontMatterDropped?: number[], pagesCount?: number | null }) {
+function ArticleDetail({ art, idx, pagesFull, pagesFullRaw, frontMatterDropped, pagesCount, sourceFromBookmarks }: { art: NonNullable<MentalOutline['titulos'][number]['articulos']>[number], idx: number, pagesFull: { num: number, text: string }[], pagesFullRaw?: { num: number, text: string }[], frontMatterDropped?: number[], pagesCount?: number | null, sourceFromBookmarks?: boolean }) {
   const [resumen, setResumen] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
 
@@ -236,7 +236,8 @@ function ArticleDetail({ art, idx, pagesFull, pagesFullRaw, frontMatterDropped, 
             articuloNumero: articuloNumero,
             articuloPagina: art.pagina_articulo,
             firstRealPage: firstRealPage,
-            frontMatterDropped: (frontMatterDropped && frontMatterDropped.length > 0) ? frontMatterDropped : null
+            frontMatterDropped: (frontMatterDropped && frontMatterDropped.length > 0) ? frontMatterDropped : null,
+            sourceFromBookmarks: sourceFromBookmarks || false // Indicar si viene desde bookmarks
           })
         })
 
@@ -248,7 +249,8 @@ function ArticleDetail({ art, idx, pagesFull, pagesFullRaw, frontMatterDropped, 
         if (data.ok && data.resumen) {
           setResumen(data.resumen)
         } else if (data.ok && data.texto_completo) {
-          setResumen('Resumen no disponible.')
+          // Si hay texto completo pero no resumen, mostrar el texto completo
+          setResumen(data.texto_completo)
         } else {
           throw new Error(data.error || 'No se pudo generar el resumen.')
         }
@@ -654,6 +656,30 @@ export default function GeneratePage() {
   const [lockedMode, setLockedMode] = useLocalStorage<boolean>('tfm.lockedLawName', false)
   const [lastMetaInfo, setLastMetaInfo] = useState<any>(null)
   const [n, setN] = useLocalStorage<number>('tfm.n', 10)
+  const [difficultyDistribution, setDifficultyDistribution] = useLocalStorage<{
+    basico: number
+    medio: number
+    avanzado: number
+  }>('tfm.difficultyDistribution', { basico: 4, medio: 4, avanzado: 4 })
+  
+  // Ajustar distribución automáticamente cuando n cambia
+  useEffect(() => {
+    const distSum = difficultyDistribution.basico + difficultyDistribution.medio + difficultyDistribution.avanzado
+    if (distSum !== n && n > 0) {
+      // Distribuir proporcionalmente
+      const ratio = n / Math.max(1, distSum)
+      const newBasico = Math.round(difficultyDistribution.basico * ratio)
+      const newMedio = Math.round(difficultyDistribution.medio * ratio)
+      const newAvanzado = n - newBasico - newMedio
+      setDifficultyDistribution({
+        basico: newBasico,
+        medio: newMedio,
+        avanzado: Math.max(0, newAvanzado) // Asegurar que no sea negativo
+      })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [n]) // Solo cuando n cambia, no cuando difficultyDistribution cambia
+  const [filterDifficulty, setFilterDifficulty] = useState<('basico' | 'medio' | 'avanzado')[]>([])
 
   // Items y corrección
   const [items, setItems] = useState<MCQItem[]>([])
@@ -678,25 +704,101 @@ export default function GeneratePage() {
     art: NonNullable<MentalOutline['titulos'][number]['articulos']>[number]
     idx: number
   } | null>(null)
+  const [bookmarks, setBookmarks] = useState<any[]>([]) // Bookmarks del PDF
+  const [mentalOutlineSource, setMentalOutlineSource] = useState<'bookmarks' | 'direct' | null>(null) // Origen del esquema mental
+  const [isOutlineOnlyView, setIsOutlineOnlyView] = useState(false) // Modo "solo esquema" (vista en nueva pestaña)
+
+  // Detectar si estamos en modo "solo esquema" (solo en el cliente)
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search)
+      setIsOutlineOnlyView(params.get('view') === 'outline')
+    }
+  }, [])
 
   // Paginación
   const PAGE_SIZE = 5
   const [page, setPage] = useState(1)
-  const totalPages = Math.max(1, Math.ceil(items.length / PAGE_SIZE))
-  const pageStart = (page - 1) * PAGE_SIZE
-  const pageEnd = Math.min(items.length, page * PAGE_SIZE)
-  const pageItems = useMemo(() => items.slice(pageStart, pageEnd), [items, page, pageStart, pageEnd])
+  // Nota: totalPages, pageStart, pageEnd ahora se calculan desde filteredItems más abajo
+  // Filtrar items por dificultad si hay filtros activos
+  const filteredItems = useMemo(() => {
+    if (filterDifficulty.length === 0) return items
+    return items.filter(item => filterDifficulty.includes(item.difficulty))
+  }, [items, filterDifficulty])
+  
+  const totalPagesFiltered = Math.max(1, Math.ceil(filteredItems.length / PAGE_SIZE))
+  const pageStartFiltered = (page - 1) * PAGE_SIZE
+  const pageEndFiltered = Math.min(filteredItems.length, page * PAGE_SIZE)
+  const pageItems = useMemo(() => filteredItems.slice(pageStartFiltered, pageEndFiltered), [filteredItems, page, pageStartFiltered, pageEndFiltered])
+  
+  // Ajustar página si está fuera de rango después de filtrar
+  useEffect(() => {
+    if (page > totalPagesFiltered && totalPagesFiltered > 0) {
+      setPage(totalPagesFiltered)
+    }
+  }, [page, totalPagesFiltered])
   useEffect(() => { setPage(1) }, [items])
 
   useEffect(() => {
     if (mentalOutline) {
       setOutlineViewMode('tree')
       setSelectedArticle(null) // Limpiar el artículo seleccionado cuando cambia el esquema mental
+      // Guardar en localStorage para que esté disponible en nueva pestaña
+      try {
+        localStorage.setItem('tfm.mentalOutline', JSON.stringify(mentalOutline))
+        localStorage.setItem('tfm.mentalOutlineSource', mentalOutlineSource || '')
+        localStorage.setItem('tfm.pagesFull', JSON.stringify(pagesFull))
+        localStorage.setItem('tfm.pagesFullRaw', JSON.stringify(pagesFullRaw || []))
+        localStorage.setItem('tfm.frontMatterDropped', JSON.stringify(frontMatterDropped || []))
+        localStorage.setItem('tfm.pagesCount', String(pagesCount || ''))
+      } catch (e) {
+        // Ignorar errores de localStorage
+      }
     }
-  }, [mentalOutline])
+  }, [mentalOutline, mentalOutlineSource, pagesFull, pagesFullRaw, frontMatterDropped, pagesCount])
+
+  // Cargar esquema desde localStorage si estamos en modo "solo esquema"
+  useEffect(() => {
+    if (isOutlineOnlyView && !mentalOutline) {
+      try {
+        const savedOutline = localStorage.getItem('tfm.mentalOutline')
+        const savedSource = localStorage.getItem('tfm.mentalOutlineSource')
+        const savedPagesFull = localStorage.getItem('tfm.pagesFull')
+        const savedPagesFullRaw = localStorage.getItem('tfm.pagesFullRaw')
+        const savedFrontMatterDropped = localStorage.getItem('tfm.frontMatterDropped')
+        const savedPagesCount = localStorage.getItem('tfm.pagesCount')
+        
+        if (savedOutline) {
+          setMentalOutline(JSON.parse(savedOutline))
+        }
+        if (savedSource) {
+          setMentalOutlineSource(savedSource as 'bookmarks' | 'direct')
+        }
+        if (savedPagesFull) {
+          setPagesFull(JSON.parse(savedPagesFull))
+        }
+        if (savedPagesFullRaw) {
+          setPagesFullRaw(JSON.parse(savedPagesFullRaw))
+        }
+        if (savedFrontMatterDropped) {
+          setFrontMatterDropped(JSON.parse(savedFrontMatterDropped))
+        }
+        if (savedPagesCount) {
+          setPagesCount(Number(savedPagesCount) || null)
+        }
+      } catch (e) {
+        // Ignorar errores al cargar desde localStorage
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOutlineOnlyView]) // Solo ejecutar cuando cambia isOutlineOnlyView
   const unansweredVisible = useMemo(
-    () => pageItems.reduce((acc, _, i) => acc + (answers[pageStart + i] ? 0 : 1), 0),
-    [pageItems, answers, pageStart]
+    () => pageItems.reduce((acc, _, i) => {
+      const originalIndex = items.findIndex(item => item === pageItems[i])
+      const gi = originalIndex >= 0 ? originalIndex : pageStartFiltered + i
+      return acc + (answers[gi] ? 0 : 1)
+    }, 0),
+    [pageItems, answers, pageStartFiltered, items]
   )
 
   // Validación solape y accesibilidad modal
@@ -725,8 +827,8 @@ export default function GeneratePage() {
     return pages
   }
   function Paginator() {
-    const nums = getPageNumbers(page, totalPages)
-    if (items.length === 0) return null
+    const nums = getPageNumbers(page, totalPagesFiltered)
+    if (filteredItems.length === 0) return null
     return (
       <div className="flex items-center justify-between py-2">
         <div className="flex items-center gap-1 text-xs">
@@ -754,15 +856,15 @@ export default function GeneratePage() {
           ))}
           <button
             type="button"
-            onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-            disabled={page >= totalPages}
+            onClick={() => setPage((p) => Math.min(totalPagesFiltered, p + 1))}
+            disabled={page >= totalPagesFiltered}
             className="px-2 py-1 rounded bg-slate-200 text-slate-800 disabled:opacity-50"
           >
             Siguiente
           </button>
         </div>
         <div className="text-xs text-slate-600">
-          Mostrando {pageStart + 1}–{pageEnd} de {items.length} · Página {page}/{totalPages}
+          Mostrando {pageStartFiltered + 1}–{pageEndFiltered} de {filteredItems.length} {filteredItems.length !== items.length ? `(de ${items.length} total)` : ''} · Página {page}/{totalPagesFiltered}
         </div>
       </div>
     )
@@ -813,6 +915,7 @@ export default function GeneratePage() {
       setPdfSchema(data.pdfSchema || null)
       setFileHash(data?.meta?.fileHash || null)
       setLastMetaInfo(data?.meta?.info || null)
+      setBookmarks(data.bookmarks || []) // Guardar bookmarks del PDF
       setMentalOutline(null)
       setMentalOutlineError(null)
       setSelectedArticle(null) // Limpiar el artículo seleccionado al cargar un nuevo PDF
@@ -839,6 +942,26 @@ export default function GeneratePage() {
       setGenError('Primero sube el PDF y espera a que se detecten los bloques.')
       return
     }
+    
+    // Validar y ajustar que la distribución de dificultad sume n
+    const distSum = difficultyDistribution.basico + difficultyDistribution.medio + difficultyDistribution.avanzado
+    let finalDistribution = { ...difficultyDistribution }
+    
+    if (distSum !== n) {
+      // Ajustar automáticamente si no coincide
+      const ratio = n / Math.max(1, distSum)
+      const newBasico = Math.round(difficultyDistribution.basico * ratio)
+      const newMedio = Math.round(difficultyDistribution.medio * ratio)
+      const newAvanzado = n - newBasico - newMedio
+      finalDistribution = {
+        basico: newBasico,
+        medio: newMedio,
+        avanzado: Math.max(0, newAvanzado)
+      }
+      // Actualizar el estado para que se refleje en la UI
+      setDifficultyDistribution(finalDistribution)
+    }
+    
     setGenError(null)
     setGenerating(true)
     setItems([])
@@ -850,7 +973,12 @@ export default function GeneratePage() {
       const res = await fetch('/api/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ lawName, n: Math.min(20, Math.max(1, n)), blocks }),
+        body: JSON.stringify({ 
+          lawName, 
+          n: Math.min(20, Math.max(1, n)), 
+          blocks,
+          difficultyDistribution: finalDistribution
+        }),
       })
       const data = await res.json()
       if (!data.ok) throw new Error(data.error || 'Fallo en /api/generate')
@@ -878,7 +1006,9 @@ export default function GeneratePage() {
     let total = 0
     const nextCorrected: Record<number, boolean> = { ...corrected }
     const nextResults: Record<number, Result> = { ...results }
-    for (let gi = pageStart; gi < pageEnd; gi++) {
+    for (let i = 0; i < pageItems.length; i++) {
+      const originalIndex = items.findIndex(item => item === pageItems[i])
+      const gi = originalIndex >= 0 ? originalIndex : pageStartFiltered + i
       const a = answers[gi]
       const it = items[gi]
       if (!it) continue
@@ -998,8 +1128,39 @@ export default function GeneratePage() {
       }
       // Transformar el esquema al formato esperado por el frontend
       setMentalOutline(data.schema as MentalOutline)
+      setMentalOutlineSource('direct') // Marcar como generado desde método directo
     } catch (e: any) {
       setMentalOutlineError(e?.message || 'Error generando esquema')
+    } finally {
+      setMentalOutlineLoading(false)
+    }
+  }
+
+  async function generateMentalOutlineFromBookmarks() {
+    if (!bookmarks || bookmarks.length === 0) {
+      setMentalOutlineError('No hay bookmarks disponibles en este PDF. Usa el método "Generar" para extraer desde el índice.')
+      return
+    }
+    setMentalOutlineLoading(true)
+    setMentalOutlineError(null)
+    try {
+      const res = await fetch('/api/mental-outline/generate-from-bookmarks', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          lawName,
+          source: lawName || pdfFile?.name || 'Documento sin título',
+          bookmarks: bookmarks,
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok || !data?.ok) {
+        throw new Error(data?.error || 'Error generando esquema desde bookmarks')
+      }
+      setMentalOutline(data.schema as MentalOutline)
+      setMentalOutlineSource('bookmarks') // Marcar como generado desde bookmarks
+    } catch (e: any) {
+      setMentalOutlineError(e?.message || 'Error generando esquema desde bookmarks')
     } finally {
       setMentalOutlineLoading(false)
     }
@@ -1390,6 +1551,72 @@ export default function GeneratePage() {
     }
   }
 
+  // Si estamos en modo "solo esquema", mostrar solo el esquema y el resumen
+  // Nota: isOutlineOnlyView se inicializa como false para evitar errores de hidratación
+  // y se actualiza en useEffect solo en el cliente
+  if (isOutlineOnlyView) {
+    if (!mentalOutline) {
+      return (
+        <div className="min-h-screen bg-white flex items-center justify-center">
+          <div className="text-center">
+            <div className="text-2xl mb-4">📄</div>
+            <h2 className="text-lg font-semibold text-slate-700 mb-2">No hay esquema disponible</h2>
+            <p className="text-sm text-slate-500">
+              Vuelve a la pestaña principal y genera el esquema primero.
+            </p>
+          </div>
+        </div>
+      )
+    }
+
+    return (
+      <div className="min-h-screen bg-white">
+        <div className="mx-auto max-w-7xl px-4 py-6">
+          <div className="flex flex-col lg:flex-row gap-6">
+            {/* Columna izquierda: Árbol plegable */}
+            <div className="w-full lg:w-80 lg:min-w-[280px] lg:max-w-[320px] flex-shrink-0">
+              <div className="sticky top-0 bg-white z-10 pb-3 mb-3 border-b border-slate-200">
+                <h3 className="text-sm font-bold text-slate-700 uppercase tracking-wide">Índice</h3>
+              </div>
+              <div className="max-h-[calc(100vh-120px)] overflow-y-auto pr-2 scrollbar-thin scrollbar-thumb-slate-300 scrollbar-track-slate-100">
+                <LegalOutlineTree 
+                  outline={mentalOutline} 
+                  onArticleSelect={(art, idx) => setSelectedArticle({ art, idx })}
+                  selectedArticleAnchor={selectedArticle?.art.anchor || null}
+                />
+              </div>
+            </div>
+            
+            {/* Columna derecha: Detalle del artículo */}
+            <div className="flex-1 min-w-0">
+              <div className="max-h-[calc(100vh-120px)] overflow-y-auto scrollbar-thin scrollbar-thumb-slate-300 scrollbar-track-slate-100">
+                {selectedArticle ? (
+                  <ArticleDetail 
+                    art={selectedArticle.art}
+                    idx={selectedArticle.idx}
+                    pagesFull={pagesFull}
+                    pagesFullRaw={pagesFullRaw}
+                    frontMatterDropped={frontMatterDropped}
+                    pagesCount={pagesCount}
+                    sourceFromBookmarks={mentalOutlineSource === 'bookmarks'}
+                  />
+                ) : (
+                  <div className="flex flex-col items-center justify-center h-full min-h-[400px] text-center p-8 bg-gradient-to-br from-slate-50 to-white rounded-xl border-2 border-dashed border-slate-300">
+                    <div className="text-5xl mb-4">📄</div>
+                    <h3 className="text-lg font-semibold text-slate-700 mb-2">Selecciona un artículo</h3>
+                    <p className="text-sm text-slate-500 max-w-sm">
+                      Haz clic en cualquier artículo del índice para ver su contenido y resumen aquí
+                    </p>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="min-h-screen bg-white">
       <section className="sticky top-0 z-30 bg-white/85 backdrop-blur supports-[backdrop-filter]:bg-white/60 border-b">
@@ -1401,7 +1628,7 @@ export default function GeneratePage() {
                 onSelect={(f) => {
                   setPdfFile(f)
                   setSelectedArticle(null) // Limpiar el artículo seleccionado al seleccionar un nuevo archivo
-                  if (f && !userEditedLawName && !lawName.trim()) setLawName(f.name.replace(/\.[^.]+$/, ''))
+                  // No auto-completar el nombre de la ley desde el archivo
                 }}
               />
               <button
@@ -1410,7 +1637,7 @@ export default function GeneratePage() {
                 disabled={uploading || !pdfFile || overlapInvalid}
                 className="mt-2 h-9 px-3 rounded-lg bg-slate-900 text-white text-sm disabled:opacity-50"
               >
-                {uploading ? 'Subiendo…' : 'Subir y detectar bloques'}
+                {uploading ? 'Subiendo…' : 'Subir PDF'}
               </button>
             </div>
             <div className="md:col-span-6 md:col-start-7 self-start">
@@ -1437,7 +1664,21 @@ export default function GeneratePage() {
                     min={MIN_Q}
                     max={MAX_Q}
                     value={n}
-                    onChange={(e) => handleNChange(Number(e.target.value) || MIN_Q)}
+                    onChange={(e) => {
+                      const newN = Number(e.target.value) || MIN_Q
+                      handleNChange(newN)
+                      // Ajustar distribución automáticamente si la suma no coincide
+                      const distSum = difficultyDistribution.basico + difficultyDistribution.medio + difficultyDistribution.avanzado
+                      if (distSum !== newN) {
+                        // Distribuir proporcionalmente
+                        const ratio = newN / Math.max(1, distSum)
+                        setDifficultyDistribution({
+                          basico: Math.round(difficultyDistribution.basico * ratio),
+                          medio: Math.round(difficultyDistribution.medio * ratio),
+                          avanzado: newN - Math.round(difficultyDistribution.basico * ratio) - Math.round(difficultyDistribution.medio * ratio)
+                        })
+                      }
+                    }}
                     onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleGenerate() } }}
                     className="h-9 w-16 text-center rounded-lg border border-slate-300 px-2 text-sm font-medium leading-tight"
                     aria-label="Número de preguntas"
@@ -1508,23 +1749,7 @@ export default function GeneratePage() {
               </button>
             </div>
             <div className="text-slate-600" aria-live="polite">
-              Páginas: {pagesCount ?? '—'} · Bloques: {blocks.length} (blockSize {blockSize}, overlap {overlap})
-            </div>
-          </div>
-          <div className="mt-2 overflow-x-auto">
-            <div className="flex items-center gap-2 min-w-max">
-              {blocks.map((b: any) => (
-                <button
-                  key={b.index}
-                  title={`p.${b.startPage}–${b.endPage}`}
-                  className="shrink-0 inline-flex items-center rounded-lg border border-slate-300 px-2 py-0.5 text-xs hover:bg-slate-50"
-                >
-                  [{b.index}] p.{b.startPage}–{b.endPage}
-                </button>
-              ))}
-              <button onClick={() => setShowBlocksModal(true)} className="shrink-0 underline text-xs">
-                Ver todos
-              </button>
+              Páginas: {pagesCount ?? '—'}
             </div>
           </div>
           {!!uploadError && <div className="mt-2 text-xs text-red-600">{uploadError}</div>}
@@ -1584,8 +1809,66 @@ export default function GeneratePage() {
             </button>
             <label className="flex items-center gap-2 text-xs md:text-sm">
               <input type="checkbox" checked={includeCorrect} onChange={(e) => setIncludeCorrect(e.target.checked)} />
-              Incluir columna “correcta” en la exportación
+              Incluir columna "correcta" en la exportación
             </label>
+            
+            {/* Filtros por dificultad */}
+            {items.length > 0 && (
+              <div className="flex items-center gap-2 text-xs md:text-sm border-l border-slate-300 pl-3">
+                <span className="text-slate-600">Filtrar:</span>
+                <label className="flex items-center gap-1 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={filterDifficulty.includes('basico')}
+                    onChange={(e) => {
+                      if (e.target.checked) {
+                        setFilterDifficulty([...filterDifficulty, 'basico'])
+                      } else {
+                        setFilterDifficulty(filterDifficulty.filter(d => d !== 'basico'))
+                      }
+                    }}
+                  />
+                  <span className="px-2 py-0.5 rounded text-emerald-700 bg-emerald-50 border border-emerald-200">Básico</span>
+                </label>
+                <label className="flex items-center gap-1 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={filterDifficulty.includes('medio')}
+                    onChange={(e) => {
+                      if (e.target.checked) {
+                        setFilterDifficulty([...filterDifficulty, 'medio'])
+                      } else {
+                        setFilterDifficulty(filterDifficulty.filter(d => d !== 'medio'))
+                      }
+                    }}
+                  />
+                  <span className="px-2 py-0.5 rounded text-amber-700 bg-amber-50 border border-amber-200">Medio</span>
+                </label>
+                <label className="flex items-center gap-1 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={filterDifficulty.includes('avanzado')}
+                    onChange={(e) => {
+                      if (e.target.checked) {
+                        setFilterDifficulty([...filterDifficulty, 'avanzado'])
+                      } else {
+                        setFilterDifficulty(filterDifficulty.filter(d => d !== 'avanzado'))
+                      }
+                    }}
+                  />
+                  <span className="px-2 py-0.5 rounded text-red-700 bg-red-50 border border-red-200">Avanzado</span>
+                </label>
+                {filterDifficulty.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setFilterDifficulty([])}
+                    className="text-xs text-slate-500 underline"
+                  >
+                    Limpiar
+                  </button>
+                )}
+              </div>
+            )}
             <div className="flex items-center gap-2">
               <button
                 type="button"
@@ -1617,7 +1900,9 @@ export default function GeneratePage() {
           <Paginator />
           <div className="grid gap-3">
             {pageItems.map((it, i) => {
-              const gi = pageStart + i
+              // Encontrar el índice original en items (sin filtrar)
+              const originalIndex = items.findIndex(item => item === it)
+              const gi = originalIndex >= 0 ? originalIndex : pageStartFiltered + i
               return (
                 <MCQCard
                   key={gi}
@@ -1637,6 +1922,9 @@ export default function GeneratePage() {
                 />
               )
             })}
+            {filteredItems.length === 0 && items.length > 0 && (
+              <div className="text-slate-600 text-sm">No hay preguntas que coincidan con los filtros de dificultad seleccionados.</div>
+            )}
             {items.length === 0 && (
               <div className="text-slate-600 text-sm">Carga un PDF y genera preguntas para empezar.</div>
             )}
@@ -1665,6 +1953,15 @@ export default function GeneratePage() {
           <div className="flex flex-wrap items-center gap-2">
             <div className="font-medium text-sm">Esquema estructurado</div>
             <div className="ml-auto flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={generateMentalOutlineFromBookmarks}
+                disabled={mentalOutlineLoading || !bookmarks.length}
+                className="h-9 px-3 rounded-lg bg-purple-600 text-white text-sm disabled:opacity-50"
+                title="Genera el esquema mental desde los bookmarks/marcadores del PDF (si están disponibles)"
+              >
+                {mentalOutlineLoading ? 'Generando…' : 'Desde Bookmarks'}
+              </button>
               <button
                 type="button"
                 onClick={generateMentalOutlineDirect}
@@ -1700,6 +1997,31 @@ export default function GeneratePage() {
             </div>
           )}
           {mentalOutlineError && <div className="text-xs text-red-500">{mentalOutlineError}</div>}
+          {bookmarks.length > 0 && (
+            <div className="text-xs text-slate-700 bg-purple-50 border border-purple-200 rounded-lg px-3 py-2">
+              <div className="flex items-center gap-2">
+                <span className="text-purple-600 font-bold">✓</span>
+                <span className="font-medium">Bookmarks disponibles</span>
+              </div>
+              <div className="mt-1 text-slate-600">
+                Puedes usar el botón <span className="font-semibold">"Desde Bookmarks"</span> para generar el esquema automáticamente desde los marcadores del PDF.
+              </div>
+            </div>
+          )}
+          {bookmarks.length === 0 && pagesFull.length > 0 && (
+            <div className="text-xs text-slate-600 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
+              <div className="flex items-center gap-2">
+                <span className="text-slate-400">ℹ</span>
+                <span className="font-medium">Este PDF no tiene bookmarks disponibles</span>
+              </div>
+              <div className="mt-1 text-slate-500">
+                Usa el botón <span className="font-semibold">"Generar"</span> para extraer el esquema desde el índice del PDF (método alternativo).
+              </div>
+              <div className="mt-2 text-[11px] text-slate-400 italic">
+                💡 Tip: Para verificar si un PDF tiene bookmarks antes de subirlo, ábrelo en Adobe Reader y revisa el panel de marcadores (Ctrl+B).
+              </div>
+            </div>
+          )}
           {mentalOutline && (
             <div className="space-y-3">
               <div className="flex flex-wrap items-center gap-2 text-xs">
@@ -1738,7 +2060,7 @@ export default function GeneratePage() {
                     <button
                       type="button"
                       onClick={() => {
-                        const url = window.location.href.split('?')[0]
+                        const url = window.location.href.split('?')[0] + '?view=outline'
                         window.open(url, '_blank', 'width=1600,height=1000')
                       }}
                       className="text-xs px-3 py-1.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 transition-colors"
@@ -1773,6 +2095,7 @@ export default function GeneratePage() {
                             pagesFullRaw={pagesFullRaw}
                             frontMatterDropped={frontMatterDropped}
                             pagesCount={pagesCount}
+                            sourceFromBookmarks={mentalOutlineSource === 'bookmarks'}
                           />
                         ) : (
                           <div className="flex flex-col items-center justify-center h-full min-h-[400px] text-center p-8 bg-gradient-to-br from-slate-50 to-white rounded-xl border-2 border-dashed border-slate-300">

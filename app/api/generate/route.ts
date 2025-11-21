@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
 import { v4 as uuidv4 } from 'uuid'
-import { distributeQuestions } from 'lib/qa/distribute'
+import { distributeQuestions, distributeByDifficulty, type DifficultyDistribution } from 'lib/qa/distribute'
 import { buildPrompt } from 'lib/qa/prompt'
 import { callModel, type MCQItem } from 'lib/qa/callModel'
 import { logEvent } from 'lib/logging/logger'
@@ -23,6 +23,13 @@ const InputSchema = z.object({
       }),
     )
     .min(1),
+  difficultyDistribution: z
+    .object({
+      basico: z.number().int().min(0),
+      medio: z.number().int().min(0),
+      avanzado: z.number().int().min(0),
+    })
+    .optional(),
 })
 
 export const runtime = 'nodejs'
@@ -32,16 +39,41 @@ export async function POST(req: Request) {
   const t0 = Date.now()
   try {
     const json = await req.json()
-    const { lawName, n, blocks } = InputSchema.parse(json)
+    const { lawName, n, blocks, difficultyDistribution } = InputSchema.parse(json)
     const m = blocks.length
-    const plan = distributeQuestions(n, m)
+    
+    // Si hay distribución de dificultad, usarla; si no, distribuir uniformemente
+    let plan: number[]
+    let difficultyPlan: DifficultyDistribution[] | null = null
+    
+    if (difficultyDistribution) {
+      const total = difficultyDistribution.basico + difficultyDistribution.medio + difficultyDistribution.avanzado
+      if (total !== n) {
+        return NextResponse.json(
+          { ok: false, error: `La suma de dificultades (${total}) debe ser igual a n (${n})` },
+          { status: 400 }
+        )
+      }
+      difficultyPlan = distributeByDifficulty(difficultyDistribution, m)
+      // Calcular el total de preguntas por bloque
+      plan = difficultyPlan.map(d => d.basico + d.medio + d.avanzado)
+    } else {
+      plan = distributeQuestions(n, m)
+    }
 
     const tasks: Array<() => Promise<MCQItem[]>> = blocks.map((b, i) => async () => {
       const qi = plan[i]
       if (!qi) return []
       const pagesRange = `p. ${b.startPage}–${b.endPage}`
       const safeText = truncateByChars(b.text, 10000)
-      const prompt = buildPrompt({ lawName, pagesRange, blockText: safeText, n: qi })
+      const blockDifficultyDist = difficultyPlan ? difficultyPlan[i] : undefined
+      const prompt = buildPrompt({ 
+        lawName, 
+        pagesRange, 
+        blockText: safeText, 
+        n: qi,
+        difficultyDistribution: blockDifficultyDist
+      })
       const pChars = prompt.length
       try {
         const itemsRaw = await callModel(prompt, 20000)
@@ -60,6 +92,12 @@ export async function POST(req: Request) {
           count: items.length,
           promptChars: pChars,
           responseChars: JSON.stringify(items).length,
+          difficultyDistribution: blockDifficultyDist,
+          itemsByDifficulty: {
+            basico: items.filter(i => i.difficulty === 'basico').length,
+            medio: items.filter(i => i.difficulty === 'medio').length,
+            avanzado: items.filter(i => i.difficulty === 'avanzado').length,
+          }
         })
         return items
       } catch (err) {
