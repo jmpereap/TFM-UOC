@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
 Script para extraer bookmarks de un PDF usando PyMuPDF (fitz)
 Uso: python scripts/extract-bookmarks.py <ruta_al_pdf>
@@ -7,6 +8,13 @@ Uso: python scripts/extract-bookmarks.py <ruta_al_pdf>
 import sys
 import json
 import base64
+import io
+
+# Configurar stdout para UTF-8
+if sys.stdout.encoding != 'utf-8':
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+if sys.stderr.encoding != 'utf-8':
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
 
 try:
     import fitz  # PyMuPDF
@@ -63,6 +71,12 @@ def extract_bookmarks(pdf_path_or_data):
         stack = []  # Pila para manejar la jerarquía: [(level, bookmark), ...]
         
         for level, title, page in toc:
+            # Asegurar que el título esté en UTF-8
+            if isinstance(title, bytes):
+                title = title.decode('utf-8', errors='replace')
+            elif not isinstance(title, str):
+                title = str(title)
+            
             bookmark = {
                 "title": title,
                 "pageNumber": page + 1,  # PyMuPDF usa índice 0, nosotros usamos 1

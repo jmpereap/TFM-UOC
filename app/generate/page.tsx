@@ -153,9 +153,12 @@ function normalizeDispositionHeading(prefix: string, item: DisposicionItem, numb
 }
 
 // Componente para mostrar el detalle del artículo seleccionado
-function ArticleDetail({ art, idx, pagesFull, pagesFullRaw, frontMatterDropped, pagesCount, sourceFromBookmarks }: { art: NonNullable<MentalOutline['titulos'][number]['articulos']>[number], idx: number, pagesFull: { num: number, text: string }[], pagesFullRaw?: { num: number, text: string }[], frontMatterDropped?: number[], pagesCount?: number | null, sourceFromBookmarks?: boolean }) {
+function ArticleDetail({ art, idx, pagesFull, pagesFullRaw, frontMatterDropped, pagesCount, sourceFromBookmarks, mentalOutline, lawName }: { art: NonNullable<MentalOutline['titulos'][number]['articulos']>[number], idx: number, pagesFull: { num: number, text: string }[], pagesFullRaw?: { num: number, text: string }[], frontMatterDropped?: number[], pagesCount?: number | null, sourceFromBookmarks?: boolean, mentalOutline?: MentalOutline | null, lawName?: string }) {
   const [resumen, setResumen] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
+  const [ficheLoading, setFicheLoading] = useState(false)
+  const [fiche, setFiche] = useState<string | null>(null)
+  const [articleData, setArticleData] = useState<any>(null)
 
   useEffect(() => {
     // Limpiar el resumen anterior y cargar el nuevo cuando cambia el artículo
@@ -254,6 +257,9 @@ function ArticleDetail({ art, idx, pagesFull, pagesFullRaw, frontMatterDropped, 
         } else {
           throw new Error(data.error || 'No se pudo generar el resumen.')
         }
+        
+        // Guardar los datos del artículo para generar la ficha
+        setArticleData(data)
       } catch (error: any) {
         console.error('Error extrayendo resumen:', error)
         setResumen(`Error: ${error.message || 'No se pudo generar el resumen.'}`)
@@ -263,6 +269,8 @@ function ArticleDetail({ art, idx, pagesFull, pagesFullRaw, frontMatterDropped, 
     }
     
     loadArticleSummary()
+    // Limpiar la ficha cuando cambia el artículo
+    setFiche(null)
   }, [art.anchor])
 
   const number = normalizeArticleNumber(art.numero, art.articulo_texto, idx)
@@ -288,6 +296,61 @@ function ArticleDetail({ art, idx, pagesFull, pagesFullRaw, frontMatterDropped, 
             )}
           </div>
         </div>
+        {/* Botón para crear ficha */}
+        {mentalOutline && lawName && articleData && (
+          <div className="mt-3 flex justify-end">
+            <button
+              type="button"
+              onClick={async () => {
+                setFicheLoading(true)
+                try {
+                  const response = await fetch('/api/mental-outline/generate-fiche', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                      articleAnchor: art.anchor,
+                      lawName,
+                      mentalOutline,
+                      articleData,
+                    }),
+                  })
+                  
+                  const data = await response.json()
+                  if (!response.ok) {
+                    throw new Error(data.error || 'Error generando ficha')
+                  }
+                  
+                  if (data.ok && data.fiche) {
+                    console.log('Ficha generada:', { length: data.fiche.length, preview: data.fiche.substring(0, 200) })
+                    setFiche(data.fiche)
+                  } else {
+                    console.error('Ficha no generada:', data)
+                    throw new Error('No se pudo generar la ficha')
+                  }
+                } catch (error: any) {
+                  console.error('Error generando ficha:', error)
+                  alert(`Error: ${error.message || 'No se pudo generar la ficha'}`)
+                } finally {
+                  setFicheLoading(false)
+                }
+              }}
+              disabled={ficheLoading}
+              className="px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+            >
+              {ficheLoading ? (
+                <>
+                  <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent"></div>
+                  <span>Generando...</span>
+                </>
+              ) : (
+                <>
+                  <span>📄</span>
+                  <span>Crear ficha</span>
+                </>
+              )}
+            </button>
+          </div>
+        )}
       </div>
 
       <div className="mt-4">
@@ -305,6 +368,37 @@ function ArticleDetail({ art, idx, pagesFull, pagesFullRaw, frontMatterDropped, 
         ) : (
           <div className="text-sm text-slate-500 italic p-4 bg-slate-50 rounded-lg border border-slate-200">
             No hay resumen disponible.
+          </div>
+        )}
+        
+        {/* Previsualización de la ficha */}
+        {fiche && (
+          <div className="mt-6 pt-6 border-t-2 border-slate-200">
+            <div className="flex items-center justify-between mb-3">
+              <h4 className="text-sm font-bold text-slate-700 uppercase tracking-wide">Ficha del artículo</h4>
+              <button
+                type="button"
+                onClick={() => {
+                  // Descargar el archivo
+                  const blob = new Blob([fiche], { type: 'text/plain;charset=utf-8' })
+                  const url = URL.createObjectURL(blob)
+                  const a = document.createElement('a')
+                  a.href = url
+                  a.download = `Ficha_Articulo_${art.numero.replace(/\s+/g, '_')}.txt`
+                  document.body.appendChild(a)
+                  a.click()
+                  document.body.removeChild(a)
+                  URL.revokeObjectURL(url)
+                }}
+                className="px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-xs font-medium hover:bg-emerald-700 flex items-center gap-1.5"
+              >
+                <span>💾</span>
+                <span>Descargar ficha</span>
+              </button>
+            </div>
+            <div className="text-xs text-slate-700 leading-relaxed whitespace-pre-wrap bg-white rounded-lg p-4 border-2 border-slate-300 shadow-sm font-mono max-h-[400px] overflow-y-auto">
+              {fiche || '(Ficha vacía)'}
+            </div>
           </div>
         )}
       </div>
@@ -1591,7 +1685,7 @@ export default function GeneratePage() {
             <div className="flex-1 min-w-0">
               <div className="max-h-[calc(100vh-120px)] overflow-y-auto scrollbar-thin scrollbar-thumb-slate-300 scrollbar-track-slate-100">
                 {selectedArticle ? (
-                  <ArticleDetail 
+                  <ArticleDetail
                     art={selectedArticle.art}
                     idx={selectedArticle.idx}
                     pagesFull={pagesFull}
@@ -1599,6 +1693,8 @@ export default function GeneratePage() {
                     frontMatterDropped={frontMatterDropped}
                     pagesCount={pagesCount}
                     sourceFromBookmarks={mentalOutlineSource === 'bookmarks'}
+                    mentalOutline={mentalOutline}
+                    lawName={lawName}
                   />
                 ) : (
                   <div className="flex flex-col items-center justify-center h-full min-h-[400px] text-center p-8 bg-gradient-to-br from-slate-50 to-white rounded-xl border-2 border-dashed border-slate-300">
@@ -1956,9 +2052,42 @@ export default function GeneratePage() {
               <button
                 type="button"
                 onClick={generateMentalOutlineFromBookmarks}
-                disabled={mentalOutlineLoading || !bookmarks.length}
+                disabled={(() => {
+                  if (mentalOutlineLoading || !bookmarks.length || !pagesCount) return true
+                  // Contar todos los bookmarks recursivamente (incluyendo hijos)
+                  const countAllBookmarks = (items: any[]): number => {
+                    let count = 0
+                    for (const item of items) {
+                      count++
+                      if (item.children && Array.isArray(item.children) && item.children.length > 0) {
+                        count += countAllBookmarks(item.children)
+                      }
+                    }
+                    return count
+                  }
+                  const totalBookmarks = countAllBookmarks(bookmarks)
+                  return totalBookmarks <= pagesCount
+                })()}
                 className="h-9 px-3 rounded-lg bg-purple-600 text-white text-sm disabled:opacity-50"
-                title="Genera el esquema mental desde los bookmarks/marcadores del PDF (si están disponibles)"
+                title={(() => {
+                  if (!bookmarks.length) return 'No hay bookmarks disponibles'
+                  if (!pagesCount) return 'No se conoce el número de páginas'
+                  const countAllBookmarks = (items: any[]): number => {
+                    let count = 0
+                    for (const item of items) {
+                      count++
+                      if (item.children && Array.isArray(item.children) && item.children.length > 0) {
+                        count += countAllBookmarks(item.children)
+                      }
+                    }
+                    return count
+                  }
+                  const totalBookmarks = countAllBookmarks(bookmarks)
+                  if (totalBookmarks <= pagesCount) {
+                    return `Los bookmarks (${totalBookmarks}) deben ser más que las páginas (${pagesCount})`
+                  }
+                  return "Genera el esquema mental desde los bookmarks/marcadores del PDF"
+                })()}
               >
                 {mentalOutlineLoading ? 'Generando…' : 'Desde Bookmarks'}
               </button>
@@ -1997,31 +2126,41 @@ export default function GeneratePage() {
             </div>
           )}
           {mentalOutlineError && <div className="text-xs text-red-500">{mentalOutlineError}</div>}
-          {bookmarks.length > 0 && (
-            <div className="text-xs text-slate-700 bg-purple-50 border border-purple-200 rounded-lg px-3 py-2">
-              <div className="flex items-center gap-2">
-                <span className="text-purple-600 font-bold">✓</span>
-                <span className="font-medium">Bookmarks disponibles</span>
+          {(() => {
+            // Contar todos los bookmarks recursivamente (incluyendo hijos)
+            const countAllBookmarks = (items: any[]): number => {
+              let count = 0
+              for (const item of items) {
+                count++
+                if (item.children && Array.isArray(item.children) && item.children.length > 0) {
+                  count += countAllBookmarks(item.children)
+                }
+              }
+              return count
+            }
+            const totalBookmarks = bookmarks.length > 0 ? countAllBookmarks(bookmarks) : 0
+            const isAvailable = pagesCount && totalBookmarks > pagesCount
+            
+            if (bookmarks.length === 0 || !isAvailable) {
+              return (
+                <div className="text-xs text-slate-600 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
+                  <div className="flex items-center gap-2">
+                    <span className="text-red-600 font-bold">✗</span>
+                    <span className="font-medium">Deshabilitado Bookmarks</span>
+                  </div>
+                </div>
+              )
+            }
+            
+            return (
+              <div className="text-xs text-slate-700 bg-purple-50 border border-purple-200 rounded-lg px-3 py-2">
+                <div className="flex items-center gap-2">
+                  <span className="text-purple-600 font-bold">✓</span>
+                  <span className="font-medium">Bookmarks disponibles</span>
+                </div>
               </div>
-              <div className="mt-1 text-slate-600">
-                Puedes usar el botón <span className="font-semibold">"Desde Bookmarks"</span> para generar el esquema automáticamente desde los marcadores del PDF.
-              </div>
-            </div>
-          )}
-          {bookmarks.length === 0 && pagesFull.length > 0 && (
-            <div className="text-xs text-slate-600 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
-              <div className="flex items-center gap-2">
-                <span className="text-slate-400">ℹ</span>
-                <span className="font-medium">Este PDF no tiene bookmarks disponibles</span>
-              </div>
-              <div className="mt-1 text-slate-500">
-                Usa el botón <span className="font-semibold">"Generar"</span> para extraer el esquema desde el índice del PDF (método alternativo).
-              </div>
-              <div className="mt-2 text-[11px] text-slate-400 italic">
-                💡 Tip: Para verificar si un PDF tiene bookmarks antes de subirlo, ábrelo en Adobe Reader y revisa el panel de marcadores (Ctrl+B).
-              </div>
-            </div>
-          )}
+            )
+          })()}
           {mentalOutline && (
             <div className="space-y-3">
               <div className="flex flex-wrap items-center gap-2 text-xs">
@@ -2096,6 +2235,8 @@ export default function GeneratePage() {
                             frontMatterDropped={frontMatterDropped}
                             pagesCount={pagesCount}
                             sourceFromBookmarks={mentalOutlineSource === 'bookmarks'}
+                            mentalOutline={mentalOutline}
+                            lawName={lawName}
                           />
                         ) : (
                           <div className="flex flex-col items-center justify-center h-full min-h-[400px] text-center p-8 bg-gradient-to-br from-slate-50 to-white rounded-xl border-2 border-dashed border-slate-300">
