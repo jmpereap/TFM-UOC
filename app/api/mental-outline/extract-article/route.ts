@@ -734,7 +734,187 @@ export async function POST(req: NextRequest) {
     })
 
     // Extraer el artículo directamente del texto
-    const extractedData = extractArticleFromText(fullText, articuloNumero)
+    let extractedData = extractArticleFromText(fullText, articuloNumero)
+    
+    logEvent('mentalOutline.article.extract.initial_extraction', {
+      articulo: articuloNumero,
+      paginaRealPDF: articuloPagina,
+      found: extractedData.found,
+      textoLength: extractedData.texto_articulo?.length || 0,
+      textoPreview: extractedData.texto_articulo?.substring(0, 150) || '',
+      rubrica: extractedData.rubrica_articulo || ''
+    })
+    
+    // Si no se encuentra o el texto parece ser de índice (muchos puntos seguidos), buscar en todo el PDF
+    const isIndexContent = extractedData.texto_articulo && 
+      ((extractedData.texto_articulo.match(/\.\s*\./g) || []).length > 5 ||
+      extractedData.texto_articulo.match(/^\.\s*\./m))
+    
+    const isTooShort = extractedData.texto_articulo && extractedData.texto_articulo.length < 50
+    
+    const shouldUseFallback = !extractedData.found || isIndexContent || isTooShort
+    
+    logEvent('mentalOutline.article.extract.fallback_check', {
+      articulo: articuloNumero,
+      paginaRealPDF: articuloPagina,
+      shouldUseFallback: shouldUseFallback,
+      found: extractedData.found,
+      isIndexContent: !!isIndexContent,
+      isTooShort: !!isTooShort,
+      textoLength: extractedData.texto_articulo?.length || 0,
+      dotsCount: extractedData.texto_articulo ? (extractedData.texto_articulo.match(/\.\s*\./g) || []).length : 0,
+      textoPreview: extractedData.texto_articulo?.substring(0, 100) || ''
+    })
+    
+    if (shouldUseFallback) {
+      logEvent('mentalOutline.article.extract.fallback_search', {
+        articulo: articuloNumero,
+        paginaRealPDF: articuloPagina,
+        reason: !extractedData.found ? 'not_found' : isIndexContent ? 'index_content' : 'too_short',
+        textoLength: extractedData.texto_articulo?.length || 0,
+        textoPreview: extractedData.texto_articulo?.substring(0, 100) || '',
+        totalPagesInPdf: normalizedPages.length
+      })
+      
+      // Buscar en todo el PDF como fallback, pero con búsqueda mejorada
+      // Buscar todas las ocurrencias de "Artículo X" y validar cuál es el artículo real
+      const fullPdfText = normalizedPages.map(page => page.text || '').join('\n\n')
+      
+      // Buscar todas las ocurrencias del artículo en el PDF
+      const normalizedNum = normalizeArticleNumber(articuloNumero)
+      const articlePattern = new RegExp(
+        `Artículo\\s+${normalizedNum}(?:\\s*(?:bis|ter|quater|quinquies|sexies|septies|octies|nonies|decies))?\\s*\\.`,
+        'gi'
+      )
+      
+      const allMatches: Array<{ index: number; text: string; pageNum?: number }> = []
+      let match
+      while ((match = articlePattern.exec(fullPdfText)) !== null) {
+        // Encontrar en qué página está este match
+        let charCount = 0
+        let pageNum = 1
+        for (const page of normalizedPages) {
+          const pageText = page.text || ''
+          if (charCount + pageText.length > match.index) {
+            pageNum = page.num
+            break
+          }
+          charCount += pageText.length + 2 // +2 por el '\n\n'
+        }
+        
+        // Extraer contexto alrededor del match (500 caracteres después)
+        const contextStart = match.index
+        const contextEnd = Math.min(fullPdfText.length, contextStart + 1000)
+        const context = fullPdfText.substring(contextStart, contextEnd)
+        
+        // Verificar si parece contenido de índice (muchos puntos seguidos)
+        const isIndex = (context.match(/\.\s*\./g) || []).length > 5 || context.match(/^\.\s*\./m)
+        
+        // Verificar si tiene contenido sustancial (palabras, no solo puntos)
+        const hasSubstantialContent = context.match(/[a-zA-ZáéíóúüñÁÉÍÓÚÜÑ]{10,}/) && 
+          context.length > 200 &&
+          !isIndex
+        
+        allMatches.push({
+          index: match.index,
+          text: context.substring(0, 200),
+          pageNum: pageNum
+        })
+        
+        logEvent('mentalOutline.article.extract.fallback_match_found', {
+          articulo: articuloNumero,
+          matchIndex: match.index,
+          pageNum: pageNum,
+          isIndex: isIndex,
+          hasSubstantialContent: hasSubstantialContent,
+          contextPreview: context.substring(0, 150)
+        })
+        
+        // Si encontramos un match que parece artículo real, intentar extraerlo
+        if (hasSubstantialContent) {
+          // Extraer desde este match
+          const textFromMatch = fullPdfText.substring(match.index)
+          const fallbackData = extractArticleFromText(textFromMatch, articuloNumero)
+          
+          if (fallbackData.found && fallbackData.texto_articulo.length > 100) {
+            const isFallbackIndex = (fallbackData.texto_articulo.match(/\.\s*\./g) || []).length > 5
+            if (!isFallbackIndex) {
+              logEvent('mentalOutline.article.extract.fallback_result', {
+                articulo: articuloNumero,
+                found: fallbackData.found,
+                textoLength: fallbackData.texto_articulo?.length || 0,
+                textoPreview: fallbackData.texto_articulo?.substring(0, 200) || '',
+                rubrica: fallbackData.rubrica_articulo || '',
+                pageNum: pageNum
+              })
+              
+              extractedData = fallbackData
+              logEvent('mentalOutline.article.extract.fallback_success', {
+                articulo: articuloNumero,
+                textoLength: extractedData.texto_articulo.length,
+                textoPreview: extractedData.texto_articulo.substring(0, 200),
+                rubrica: extractedData.rubrica_articulo || '',
+                pageNum: pageNum
+              })
+              break // Salir del bucle si encontramos un artículo válido
+            }
+          }
+        }
+      }
+      
+      // Si no encontramos un artículo válido en el bucle anterior, intentar la búsqueda normal
+      if (!extractedData.found || extractedData.texto_articulo.length < 100) {
+        const fallbackData = extractArticleFromText(fullPdfText, articuloNumero)
+        
+        logEvent('mentalOutline.article.extract.fallback_result', {
+          articulo: articuloNumero,
+          found: fallbackData.found,
+          textoLength: fallbackData.texto_articulo?.length || 0,
+          textoPreview: fallbackData.texto_articulo?.substring(0, 200) || '',
+          rubrica: fallbackData.rubrica_articulo || '',
+          totalMatchesFound: allMatches.length
+        })
+        
+        if (fallbackData.found && fallbackData.texto_articulo.length > 100) {
+          // Verificar que no sea contenido de índice
+          const isFallbackIndex = (fallbackData.texto_articulo.match(/\.\s*\./g) || []).length > 5
+          logEvent('mentalOutline.article.extract.fallback_validation', {
+            articulo: articuloNumero,
+            isFallbackIndex: isFallbackIndex,
+            dotsCount: (fallbackData.texto_articulo.match(/\.\s*\./g) || []).length,
+            textoLength: fallbackData.texto_articulo.length
+          })
+          
+          if (!isFallbackIndex) {
+            extractedData = fallbackData
+            logEvent('mentalOutline.article.extract.fallback_success', {
+              articulo: articuloNumero,
+              textoLength: extractedData.texto_articulo.length,
+              textoPreview: extractedData.texto_articulo.substring(0, 200),
+              rubrica: extractedData.rubrica_articulo || ''
+            })
+          } else {
+            logEvent('mentalOutline.article.extract.fallback_rejected', {
+              articulo: articuloNumero,
+              reason: 'fallback_result_is_index_content',
+              textoPreview: fallbackData.texto_articulo.substring(0, 100)
+            })
+          }
+        } else {
+          logEvent('mentalOutline.article.extract.fallback_rejected', {
+            articulo: articuloNumero,
+            reason: fallbackData.found ? 'too_short' : 'not_found',
+            textoLength: fallbackData.texto_articulo?.length || 0,
+            totalMatchesFound: allMatches.length
+          })
+        }
+      }
+    } else {
+      logEvent('mentalOutline.article.extract.no_fallback_needed', {
+        articulo: articuloNumero,
+        textoLength: extractedData.texto_articulo?.length || 0
+      })
+    }
     
     // Validar la respuesta
     if (!extractedData.found) {
