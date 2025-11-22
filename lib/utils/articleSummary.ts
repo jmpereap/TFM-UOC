@@ -18,14 +18,44 @@ export async function generateArticleSummaryWithAI(
   }
 
   try {
+    // Limpiar el patrón "Página X" del texto antes de enviarlo a la IA
+    // Solo eliminar el patrón, sin tocar el resto del texto
+    const textoOriginal = textoCompleto
+    let textoLimpio = textoCompleto.replace(/P[áa]gina\s+\d+/gi, '').trim()
+    
+    // Reasignar textoCompleto con el texto limpio
+    textoCompleto = textoLimpio
+    
+    // Log del texto limpio para verificar la limpieza
+    logEvent('articleSummary.texto_limpio', {
+      numeroArticulo: numeroArticulo,
+      textoOriginalLength: textoOriginal.length,
+      textoLimpioLength: textoLimpio.length,
+      textoLimpio: textoLimpio,
+      textoLimpioPreview: textoLimpio.substring(0, 500),
+      textoCompletoDespuesLimpieza: textoCompleto,
+      textoCompletoLength: textoCompleto.length
+    })
+    
     // Logging del texto completo del artículo
     logEvent('articleSummary.ai.input', {
       numeroArticulo: numeroArticulo,
       rubricaArticulo: rubricaArticulo,
       textoLength: textoCompleto.length,
-      textoCompleto: textoCompleto, // Texto completo del artículo
+      textoCompleto: textoCompleto, // Texto completo del artículo (sin "Página X")
       textoPreview: textoCompleto.substring(0, 500)
     })
+
+    // Verificar si el texto es lo suficientemente largo para resumir
+    // Si el texto es muy corto (menos de 100 caracteres), no tiene sentido resumirlo
+    if (textoCompleto.length < 100) {
+      logEvent('articleSummary.ai.skip_short_text', {
+        numeroArticulo: numeroArticulo,
+        textoLength: textoCompleto.length,
+        reason: 'Texto demasiado corto para resumir'
+      })
+      return ''
+    }
 
     // Construir el prompt para la IA
     const prompt = `Eres un experto en derecho español. Resume de forma clara y coherente el siguiente artículo legal.
@@ -34,15 +64,21 @@ ${rubricaArticulo ? `Rúbrica: ${rubricaArticulo}\n\n` : ''}${numeroArticulo ? `
 
 ${textoCompleto}
 
+IMPORTANTE:
+- NO INVENTES contenido. Solo resume lo que está escrito en el texto.
+- Si el texto es demasiado corto o no tiene suficiente contenido para resumir, responde con {"resumen": ""} (resumen vacío).
+- Si el texto no tiene apartados numerados o estructura compleja, simplemente parafrasea el contenido sin añadir información que no esté en el texto original.
+
 Genera un resumen completo y detallado (máximo 1200 caracteres) que:
 1. Sea coherente y bien estructurado
-2. Capture TODOS los puntos principales del artículo
+2. Capture TODOS los puntos principales del artículo (solo lo que está en el texto)
 3. Incluya los apartados numerados (1., 2., 3., etc.) y sus contenidos principales
 4. Incluya las letras (a), b), c), etc.) si son relevantes
 5. Use lenguaje claro y preciso
 6. Puede perder el formato original si es necesario para mayor claridad
+7. NO añadas información que no esté explícitamente en el texto original
 
-Responde SOLO con un objeto JSON que tenga un campo "resumen" con el texto del resumen. Ejemplo: {"resumen": "Texto del resumen aquí"}`
+Responde SOLO con un objeto JSON que tenga un campo "resumen" con el texto del resumen. Si el texto no es resumible, usa {"resumen": ""}. Ejemplo: {"resumen": "Texto del resumen aquí"}`
 
     // Llamar a la IA para generar el resumen
     const response = await callModelJSON(

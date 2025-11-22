@@ -3,8 +3,12 @@ import { logEvent } from '@/lib/logging/logger'
 import { PageEntry } from '@/lib/pdf/pagesMap'
 import { generateArticleSummary } from '@/lib/utils/articleSummary'
 import { generateArticleSummaryWithAI } from '@/lib/utils/articleSummary'
+import { RX_BOE_FOOTER } from '@/lib/legal/fragments'
 
 export const runtime = 'nodejs'
+
+// Patrón para detectar cabeceras del BOE (BOLETÍN OFICIAL DEL ESTADO, LEGISLACIÓN CONSOLIDADA)
+const RX_BOE_HEADER = /BOLET[ÍI]N\s+OFICIAL\s+DEL\s+ESTADO|LEGISLACI[ÓO]N\s+CONSOLIDADA/gi
 
 // Función para normalizar el número de artículo para búsqueda
 function normalizeArticleNumber(articuloNumero: string): string {
@@ -99,11 +103,119 @@ function extractArticleFromText(
   // PASO 2: Extraer el cuerpo del artículo (después de la rúbrica hasta el siguiente delimitador)
   const remainingText = fullText.substring(textoStartIndex)
   
-  // Buscar el final del artículo
-  const endIndex = findArticleEnd(remainingText, normalizedNum)
+  // Patrón para buscar el siguiente delimitador (excluyendo el artículo actual)
+  const nextDelimiterPattern = new RegExp(
+    `(?:^|\\n)\\s*(?:Artículo\\s+(?!${normalizedNum}(?:\\s*(?:bis|ter|quater|quinquies|sexies|septies|octies|nonies|decies))?\\s*\\.)[\\d]+(?:\\s*(?:bis|ter|quater|quinquies|sexies|septies|octies|nonies|decies))?\\s*\\.|TÍTULO|CAPÍTULO|SECCIÓN|DISPOSICIÓN)`,
+    'gim'
+  )
+  
+  // Buscar todas las cabeceras y pies de página en el texto original
+  const allHeaders = Array.from(remainingText.matchAll(RX_BOE_HEADER))
+  const allFooters = Array.from(remainingText.matchAll(RX_BOE_FOOTER))
+  const allHeadersFooters = [...allHeaders, ...allFooters]
+    .map(m => ({ start: m.index!, end: m.index! + m[0].length }))
+    .sort((a, b) => a.start - b.start)
+  
+  // Función para verificar si una posición está dentro de una cabecera o pie de página
+  const isInHeaderOrFooter = (pos: number): boolean => {
+    return allHeadersFooters.some(hf => pos >= hf.start && pos < hf.end)
+  }
+  
+  // Buscar todas las ocurrencias de delimitadores en el texto original
+  const delimiterMatches = Array.from(remainingText.matchAll(nextDelimiterPattern))
+  
+  let endIndex = remainingText.length // Por defecto, hasta el final del texto
+  
+  // Buscar el primer delimitador que NO esté dentro de una cabecera o pie de página
+  let foundDelimiterIndex: number | null = null
+  
+  for (const delimiterMatch of delimiterMatches) {
+    const delimiterIndex = delimiterMatch.index!
+    
+    // Verificar que el delimitador no esté dentro de una cabecera o pie
+    if (!isInHeaderOrFooter(delimiterIndex)) {
+      foundDelimiterIndex = delimiterIndex
+      break
+    }
+  }
+  
+  // Si encontramos un delimitador, verificar si hay cabeceras/pies antes de él
+  // Si las hay, asegurarnos de incluir todo el contenido hasta el delimitador
+  if (foundDelimiterIndex !== null) {
+    // Buscar cabeceras/pies que estén antes del delimitador
+    for (const hf of allHeadersFooters) {
+      if (hf.end < foundDelimiterIndex) {
+        // Hay una cabecera/pie antes del delimitador
+        // Verificar si hay contenido después de la cabecera/pie
+        const textAfterHeaderFooter = remainingText.substring(hf.end, foundDelimiterIndex).trim()
+        
+        // Si hay contenido después de la cabecera/pie, el artículo continúa
+        // El endIndex se establecerá en el delimitador, incluyendo todo el contenido
+        // hasta él (incluyendo lo que está después de la cabecera/pie)
+      }
+    }
+    
+    // Buscar el salto de línea antes del delimitador para cortar limpiamente
+    let cutIndex = foundDelimiterIndex
+    const lineBreakBefore = remainingText.lastIndexOf('\n', foundDelimiterIndex)
+    if (lineBreakBefore >= 0) {
+      cutIndex = lineBreakBefore
+    } else {
+      // Si no hay salto de línea, buscar espacio antes
+      const spaceBefore = remainingText.lastIndexOf(' ', foundDelimiterIndex)
+      if (spaceBefore >= 0 && foundDelimiterIndex - spaceBefore < 20) {
+        cutIndex = spaceBefore
+      }
+    }
+    
+    endIndex = cutIndex
+  }
+  
   let textoArticulo = remainingText.substring(0, endIndex).trim()
   
+  // IMPORTANTE: Verificar si el texto termina en una cabecera o pie de página
+  // Si es así, el artículo continúa después de la cabecera/pie
+  // Buscar la última cabecera/pie que esté antes o en endIndex
+  const lastHeaderFooter = allHeadersFooters
+    .filter(hf => hf.start < endIndex)
+    .sort((a, b) => b.end - a.end)[0]
+  
+  if (lastHeaderFooter && endIndex <= lastHeaderFooter.end) {
+    // El texto se cortó en una cabecera/pie. Buscar el siguiente delimitador después de la cabecera/pie
+    const textAfterHeaderFooter = remainingText.substring(lastHeaderFooter.end)
+    
+    // Crear una nueva instancia del patrón para evitar problemas de estado
+    const delimiterPatternAfter = new RegExp(
+      `(?:^|\\n)\\s*(?:Artículo\\s+(?!${normalizedNum}(?:\\s*(?:bis|ter|quater|quinquies|sexies|septies|octies|nonies|decies))?\\s*\\.)[\\d]+(?:\\s*(?:bis|ter|quater|quinquies|sexies|septies|octies|nonies|decies))?\\s*\\.|TÍTULO|CAPÍTULO|SECCIÓN|DISPOSICIÓN)`,
+      'gim'
+    )
+    const delimiterMatchesAfter = Array.from(textAfterHeaderFooter.matchAll(delimiterPatternAfter))
+    
+    if (delimiterMatchesAfter.length > 0) {
+      const delimiterAfter = delimiterMatchesAfter[0]
+      // Hay un delimitador después de la cabecera/pie
+      // Incluir todo el contenido hasta ese delimitador
+      const newEndIndex = lastHeaderFooter.end + delimiterAfter.index!
+      
+      // Buscar el salto de línea antes del delimitador
+      let cutIndex = newEndIndex
+      const lineBreakBefore = remainingText.lastIndexOf('\n', newEndIndex)
+      if (lineBreakBefore >= 0) {
+        cutIndex = lineBreakBefore
+      } else {
+        const spaceBefore = remainingText.lastIndexOf(' ', newEndIndex)
+        if (spaceBefore >= 0 && newEndIndex - spaceBefore < 20) {
+          cutIndex = spaceBefore
+        }
+      }
+      
+      // Actualizar el texto del artículo para incluir el contenido después de la cabecera/pie
+      textoArticulo = remainingText.substring(0, cutIndex).trim()
+    }
+  }
+  
   // Verificación adicional: si el texto contiene "Artículo Y." (donde Y != X), cortar antes
+  // PERO solo si no está dentro de una cabecera o pie
   const siguienteArticuloPattern = new RegExp(
     `Artículo\\s+(?!${normalizedNum}(?:\\s*(?:bis|ter|quater|quinquies|sexies|septies|octies|nonies|decies))?\\s*\\.)[\\d]+(?:\\s*(?:bis|ter|quater|quinquies|sexies|septies|octies|nonies|decies))?\\s*\\.`,
     'i'
@@ -111,26 +223,38 @@ function extractArticleFromText(
   
   const siguienteArticuloMatch = textoArticulo.match(siguienteArticuloPattern)
   if (siguienteArticuloMatch && siguienteArticuloMatch.index !== undefined) {
-    // El texto contiene el siguiente artículo, cortar antes
     const siguienteArticuloIndex = siguienteArticuloMatch.index!
-    // Buscar el salto de línea antes del siguiente artículo
-    const lineBreakBefore = textoArticulo.lastIndexOf('\n', siguienteArticuloIndex)
-    if (lineBreakBefore >= 0) {
-      textoArticulo = textoArticulo.substring(0, lineBreakBefore).trim()
-    } else {
-      // Si no hay salto de línea, buscar espacio antes
-      const spaceBefore = textoArticulo.lastIndexOf(' ', siguienteArticuloIndex)
-      if (spaceBefore >= 0) {
-        textoArticulo = textoArticulo.substring(0, spaceBefore).trim()
+    
+    // Verificar que el siguiente artículo no esté dentro de una cabecera o pie
+    // textoArticulo es un substring de remainingText que empieza en 0, así que el índice es relativo
+    // Pero necesitamos el índice absoluto en remainingText
+    // Como textoArticulo = remainingText.substring(0, endIndex), el índice es el mismo
+    const absoluteIndex = siguienteArticuloIndex
+    if (absoluteIndex < remainingText.length && !isInHeaderOrFooter(absoluteIndex)) {
+      // El texto contiene el siguiente artículo, cortar antes
+      // Buscar el salto de línea antes del siguiente artículo
+      const lineBreakBefore = textoArticulo.lastIndexOf('\n', siguienteArticuloIndex)
+      if (lineBreakBefore >= 0) {
+        textoArticulo = textoArticulo.substring(0, lineBreakBefore).trim()
       } else {
-        // Si no hay espacio, cortar en la posición del siguiente artículo
-        textoArticulo = textoArticulo.substring(0, siguienteArticuloIndex).trim()
+        // Si no hay salto de línea, buscar espacio antes
+        const spaceBefore = textoArticulo.lastIndexOf(' ', siguienteArticuloIndex)
+        if (spaceBefore >= 0) {
+          textoArticulo = textoArticulo.substring(0, spaceBefore).trim()
+        } else {
+          // Si no hay espacio, cortar en la posición del siguiente artículo
+          textoArticulo = textoArticulo.substring(0, siguienteArticuloIndex).trim()
+        }
       }
     }
   }
   
   // PASO 3: Limpiar el texto (solo elementos de formato, preservar contenido)
   textoArticulo = cleanArticleText(textoArticulo)
+  
+  // PASO 4: Eliminar SIEMPRE cabeceras y pies de página del texto del artículo
+  // Las cabeceras y pies de página no son parte del contenido del artículo, solo son metadata de formato
+  textoArticulo = textoArticulo.replace(RX_BOE_HEADER, '').replace(RX_BOE_FOOTER, '').trim()
   
   return {
     found: true,
@@ -149,6 +273,7 @@ function findArticleEnd(text: string, currentArticleNum: string): number {
   // 4. SECCIÓN
   // 5. DISPOSICIÓN
   // 6. Final del texto
+  // IMPORTANTE: El pie de página NO es un delimitador - el artículo puede continuar después del pie
   
   let earliestEnd = text.length
   
@@ -253,6 +378,125 @@ function cleanArticleText(text: string): string {
     .filter(line => line.length > 0) // Eliminar líneas vacías
     .join('\n')
     .trim()
+}
+
+// Función para eliminar el pie de página si el artículo termina en una página
+// IMPORTANTE: Solo eliminar si el artículo realmente termina (no continúa en la siguiente página)
+// El artículo termina cuando encuentra: otro Artículo, TÍTULO, CAPÍTULO, SECCIÓN, DISPOSICIÓN, o fin del texto
+function removeFooterIfArticleEndsOnPage(
+  textoArticulo: string,
+  pagesToAnalyze: PageEntry[],
+  fullText: string,
+  articuloNumero: string
+): string {
+  if (!textoArticulo || textoArticulo.trim().length === 0) {
+    return textoArticulo
+  }
+  
+  // Primero, verificar si el texto del artículo contiene el patrón del pie de página
+  const footerMatch = textoArticulo.match(RX_BOE_FOOTER)
+  if (!footerMatch) {
+    // No hay pie de página en el texto, no hacer nada
+    return textoArticulo
+  }
+  
+  // Obtener las últimas líneas del texto del artículo (últimas 3 líneas)
+  const articleLines = textoArticulo.split(/\r?\n/).filter(l => l.trim().length > 0)
+  if (articleLines.length === 0) {
+    return textoArticulo
+  }
+  
+  const lastArticleLines = articleLines.slice(-3).join('\n')
+  
+  // Verificar si el pie de página está en las últimas líneas del artículo
+  const lastLinesWithFooter = lastArticleLines.match(RX_BOE_FOOTER)
+  if (!lastLinesWithFooter) {
+    // El pie de página no está al final, no hacer nada (podría ser parte del contenido)
+    return textoArticulo
+  }
+  
+  // CRÍTICO: Verificar si el artículo realmente termina usando la misma lógica que extractArticleFromText
+  // Necesitamos encontrar dónde termina el artículo en fullText usando findArticleEnd
+  const normalizedNum = normalizeArticleNumber(articuloNumero)
+  
+  // Buscar el inicio del artículo en fullText
+  const articleStartPattern = new RegExp(
+    `^Artículo\\s+${normalizedNum}(?:\\s*(?:bis|ter|quater|quinquies|sexies|septies|octies|nonies|decies))?\\s*\\.`,
+    'im'
+  )
+  
+  const articleStartMatch = fullText.match(articleStartPattern)
+  if (!articleStartMatch) {
+    // No podemos determinar, ser conservador y no eliminar
+    return textoArticulo
+  }
+  
+  const headerStartIndex = articleStartMatch.index! + articleStartMatch[0].length
+  const afterHeader = fullText.substring(headerStartIndex)
+  
+  // Extraer rúbrica
+  const rubricaMatch = afterHeader.match(/^\s*([^.:\n]+?)(?:\.|:)(?:\s|$|\n)/)
+  const textoStartIndex = headerStartIndex + (rubricaMatch ? rubricaMatch[0].length : 0)
+  
+  // Encontrar dónde termina el artículo en el fullText usando la misma función que extractArticleFromText
+  const remainingText = fullText.substring(textoStartIndex)
+  const endIndex = findArticleEnd(remainingText, normalizedNum)
+  const articleEndInFullText = textoStartIndex + endIndex
+  
+  // Obtener el texto completo del artículo desde fullText (sin limpiar aún, pero sin pie de página para comparar)
+  const fullArticleTextFromFullText = fullText.substring(textoStartIndex, articleEndInFullText)
+  
+  // Normalizar ambos textos para comparar (sin el pie de página, normalizar espacios)
+  const normalizedExtracted = textoArticulo.replace(RX_BOE_FOOTER, '').replace(/\s+/g, ' ').trim()
+  const normalizedFullTextArticle = fullArticleTextFromFullText.replace(RX_BOE_FOOTER, '').replace(/\s+/g, ' ').trim()
+  
+  // Verificar si el texto extraído es significativamente más corto que el texto completo
+  // Si es más corto en más de 50 caracteres, probablemente el artículo continúa
+  const lengthDifference = normalizedFullTextArticle.length - normalizedExtracted.length
+  const articleContinues = lengthDifference > 50
+  
+  // Obtener el texto después del artículo en fullText
+  const textAfterArticle = fullText.substring(articleEndInFullText).trim()
+  
+  // Verificar si después del artículo hay un delimitador (siguiente artículo, TÍTULO, etc.)
+  const hasDelimiterAfter = /(?:^|\n)\s*(?:Artículo\s+\d+|TÍTULO|CAPÍTULO|SECCIÓN|DISPOSICIÓN)/i.test(textAfterArticle)
+  
+  // Solo eliminar el pie de página si:
+  // 1. El pie está en las últimas líneas del artículo extraído
+  // 2. Y hay un delimitador después del artículo (el artículo realmente terminó)
+  // 3. Y el texto extraído NO es significativamente más corto que el texto completo (el artículo no continúa)
+  // 4. Y el texto extraído termina igual que el artículo completo (sin pie)
+  if (lastLinesWithFooter && hasDelimiterAfter && !articleContinues) {
+    // Verificar que el texto extraído termina igual que el artículo completo (sin pie)
+    // Comparar los últimos 150 caracteres para asegurar que coinciden
+    const extractedEnd = normalizedExtracted.substring(Math.max(0, normalizedExtracted.length - 150))
+    const fullTextEnd = normalizedFullTextArticle.substring(Math.max(0, normalizedFullTextArticle.length - 150))
+    
+    // Si el final coincide (o el extraído es igual al completo), el artículo terminó aquí
+    const endsMatch = fullTextEnd.endsWith(extractedEnd) || 
+                     extractedEnd === fullTextEnd ||
+                     (normalizedExtracted.length > 0 && normalizedFullTextArticle.endsWith(normalizedExtracted))
+    
+    if (endsMatch) {
+      const textoLimpio = textoArticulo.replace(RX_BOE_FOOTER, '').trim()
+      
+      logEvent('mentalOutline.article.extract.footer_removed', {
+        textoLengthBefore: textoArticulo.length,
+        textoLengthAfter: textoLimpio.length,
+        footerRemoved: textoArticulo.length > textoLimpio.length,
+        hasDelimiterAfter: hasDelimiterAfter,
+        articleContinues: articleContinues,
+        lengthDifference: lengthDifference,
+        extractedLength: normalizedExtracted.length,
+        fullTextLength: normalizedFullTextArticle.length,
+        endsMatch: endsMatch
+      })
+      
+      return textoLimpio
+    }
+  }
+  
+  return textoArticulo
 }
 
 export async function POST(req: NextRequest) {
@@ -528,6 +772,12 @@ export async function POST(req: NextRequest) {
     let rubricaArticulo = extractedData.rubrica_articulo || ''
     let textoCompleto = extractedData.texto_articulo || ''
     const numeroArticulo = extractedData.numero_articulo || articuloNumero
+
+    // Limpiar el patrón "Página X" del texto antes de usarlo
+    // Solo eliminar el patrón, sin tocar el resto del texto
+    textoCompleto = textoCompleto.replace(/P[áa]gina\s+\d+/gi, '').trim()
+
+    // El pie de página ya se eliminó en extractArticleFromText (siempre se elimina)
 
     // Si el texto está vacío pero hay rúbrica, usar la rúbrica como texto
     if (!textoCompleto || textoCompleto.trim().length === 0) {
