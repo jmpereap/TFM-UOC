@@ -70,9 +70,29 @@ function extractArticleFromText(
     const afterHeader = fullText.substring(headerStartIndex)
     
     // Extraer rúbrica (hasta el primer punto o dos puntos)
+    // Verificar que NO sea solo un número seguido de punto o paréntesis
     const rubricaMatch = afterHeader.match(/^\s*([^.:\n]+?)(?:\.|:)(?:\s|$|\n)/)
-    const rubricaArticulo = rubricaMatch ? rubricaMatch[1].trim() : ''
-    const textoStartIndex = headerStartIndex + (rubricaMatch ? rubricaMatch[0].length : 0)
+    let rubricaArticulo = ''
+    let textoStartIndex = headerStartIndex
+    
+    if (rubricaMatch) {
+      const potentialRubrica = rubricaMatch[1].trim()
+      
+      // Verificar que NO sea solo un número seguido de punto o paréntesis
+      const isJustNumber = /^\d+[.)]?$/.test(potentialRubrica)
+      
+      // Verificar que tenga al menos algunas letras (no solo números y símbolos)
+      const hasLetters = /[a-zA-ZáéíóúüñÁÉÍÓÚÜÑ]/.test(potentialRubrica)
+      
+      // Solo considerar como rúbrica si no es solo un número y tiene letras
+      if (!isJustNumber && hasLetters && potentialRubrica.length >= 2) {
+        rubricaArticulo = potentialRubrica
+        textoStartIndex = headerStartIndex + rubricaMatch[0].length
+      } else {
+        // No hay rúbrica válida, el texto empieza después de "Artículo X."
+        textoStartIndex = headerStartIndex
+      }
+    }
     
     // Buscar el final del artículo
     const remainingText = fullText.substring(textoStartIndex)
@@ -96,9 +116,33 @@ function extractArticleFromText(
   
   // Extraer la rúbrica (hasta el PRIMER punto o dos puntos)
   // La rúbrica NO debe incluir números como "1." porque eso es parte del texto del artículo
+  // Tampoco debe ser solo un número seguido de punto o paréntesis
   const rubricaMatch = afterHeader.match(/^\s*([^.:\n]+?)(?:\.|:)(?:\s|$|\n)/)
-  const rubricaArticulo = rubricaMatch ? rubricaMatch[1].trim() : ''
-  const textoStartIndex = headerStartIndex + (rubricaMatch ? rubricaMatch[0].length : 0)
+  let rubricaArticulo = ''
+  let textoStartIndex = headerStartIndex
+  
+  if (rubricaMatch) {
+    const potentialRubrica = rubricaMatch[1].trim()
+    
+    // Verificar que NO sea solo un número seguido de punto o paréntesis
+    // Patrones a rechazar: "1", "1.", "1)", "2", "2.", etc.
+    const isJustNumber = /^\d+[.)]?$/.test(potentialRubrica)
+    
+    // Verificar que tenga al menos algunas letras (no solo números y símbolos)
+    const hasLetters = /[a-zA-ZáéíóúüñÁÉÍÓÚÜÑ]/.test(potentialRubrica)
+    
+    // Solo considerar como rúbrica si:
+    // 1. No es solo un número
+    // 2. Tiene letras (es texto real, no solo números)
+    // 3. Tiene al menos 2 caracteres (para evitar casos como "a.")
+    if (!isJustNumber && hasLetters && potentialRubrica.length >= 2) {
+      rubricaArticulo = potentialRubrica
+      textoStartIndex = headerStartIndex + rubricaMatch[0].length
+    } else {
+      // No hay rúbrica válida, el texto empieza después de "Artículo X."
+      textoStartIndex = headerStartIndex
+    }
+  }
   
   // PASO 2: Extraer el cuerpo del artículo (después de la rúbrica hasta el siguiente delimitador)
   const remainingText = fullText.substring(textoStartIndex)
@@ -434,9 +478,22 @@ function removeFooterIfArticleEndsOnPage(
   const headerStartIndex = articleStartMatch.index! + articleStartMatch[0].length
   const afterHeader = fullText.substring(headerStartIndex)
   
-  // Extraer rúbrica
+  // Extraer rúbrica (verificar que NO sea solo un número)
   const rubricaMatch = afterHeader.match(/^\s*([^.:\n]+?)(?:\.|:)(?:\s|$|\n)/)
-  const textoStartIndex = headerStartIndex + (rubricaMatch ? rubricaMatch[0].length : 0)
+  let textoStartIndex = headerStartIndex
+  
+  if (rubricaMatch) {
+    const potentialRubrica = rubricaMatch[1].trim()
+    const isJustNumber = /^\d+[.)]?$/.test(potentialRubrica)
+    const hasLetters = /[a-zA-ZáéíóúüñÁÉÍÓÚÜÑ]/.test(potentialRubrica)
+    
+    // Solo considerar como rúbrica si no es solo un número y tiene letras
+    if (!isJustNumber && hasLetters && potentialRubrica.length >= 2) {
+      textoStartIndex = headerStartIndex + rubricaMatch[0].length
+    } else {
+      textoStartIndex = headerStartIndex
+    }
+  }
   
   // Encontrar dónde termina el artículo en el fullText usando la misma función que extractArticleFromText
   const remainingText = fullText.substring(textoStartIndex)
