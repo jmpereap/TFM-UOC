@@ -297,19 +297,31 @@ function ArticleDetail({ art, idx, pagesFull, pagesFullRaw, frontMatterDropped, 
           </div>
         </div>
         {/* Botón para crear ficha */}
-        {mentalOutline && lawName && articleData && (
+        {mentalOutline && articleData && (
           <div className="mt-3 flex justify-end">
             <button
               type="button"
               onClick={async () => {
                 setFicheLoading(true)
                 try {
+                  // Log antes de enviar
+                  console.log('Generando ficha con:', {
+                    articleAnchor: art.anchor,
+                    lawName,
+                    lawNameType: typeof lawName,
+                    lawNameValue: JSON.stringify(lawName),
+                    hasMentalOutline: !!mentalOutline,
+                    hasMetadata: !!mentalOutline?.metadata,
+                    metadataSource: mentalOutline?.metadata?.source,
+                    metadataDocumentTitle: mentalOutline?.metadata?.document_title,
+                  })
+                  
                   const response = await fetch('/api/mental-outline/generate-fiche', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                       articleAnchor: art.anchor,
-                      lawName,
+                      lawName: lawName || '', // Asegurar que siempre sea string
                       mentalOutline,
                       articleData,
                     }),
@@ -809,6 +821,14 @@ export default function GeneratePage() {
       setIsOutlineOnlyView(params.get('view') === 'outline')
     }
   }, [])
+  
+  // Inicializar lawName en blanco al cargar la página (solo en la página principal, no en la vista del esquema)
+  useEffect(() => {
+    if (!isOutlineOnlyView) {
+      setLawName('')
+      setUserEditedLawName(false)
+    }
+  }, [isOutlineOnlyView]) // Solo al montar el componente y cuando cambia isOutlineOnlyView
 
   // Paginación
   const PAGE_SIZE = 5
@@ -845,6 +865,10 @@ export default function GeneratePage() {
         localStorage.setItem('tfm.pagesFullRaw', JSON.stringify(pagesFullRaw || []))
         localStorage.setItem('tfm.frontMatterDropped', JSON.stringify(frontMatterDropped || []))
         localStorage.setItem('tfm.pagesCount', String(pagesCount || ''))
+        // Guardar también lawName para que esté disponible en la vista del esquema
+        if (lawName) {
+          localStorage.setItem('tfm.lawName', lawName)
+        }
       } catch (e) {
         // Ignorar errores de localStorage
       }
@@ -861,6 +885,7 @@ export default function GeneratePage() {
         const savedPagesFullRaw = localStorage.getItem('tfm.pagesFullRaw')
         const savedFrontMatterDropped = localStorage.getItem('tfm.frontMatterDropped')
         const savedPagesCount = localStorage.getItem('tfm.pagesCount')
+        const savedLawName = localStorage.getItem('tfm.lawName')
         
         if (savedOutline) {
           setMentalOutline(JSON.parse(savedOutline))
@@ -879,6 +904,10 @@ export default function GeneratePage() {
         }
         if (savedPagesCount) {
           setPagesCount(Number(savedPagesCount) || null)
+        }
+        // Cargar también lawName para que esté disponible en la vista del esquema
+        if (savedLawName) {
+          setLawName(savedLawName)
         }
       } catch (e) {
         // Ignorar errores al cargar desde localStorage
@@ -1223,6 +1252,12 @@ export default function GeneratePage() {
       // Transformar el esquema al formato esperado por el frontend
       setMentalOutline(data.schema as MentalOutline)
       setMentalOutlineSource('direct') // Marcar como generado desde método directo
+      
+      // Abrir automáticamente en nueva pestaña
+      setTimeout(() => {
+        const url = window.location.href.split('?')[0] + '?view=outline'
+        window.open(url, '_blank', 'width=1600,height=1000')
+      }, 100) // Pequeño delay para asegurar que el estado se haya actualizado
     } catch (e: any) {
       setMentalOutlineError(e?.message || 'Error generando esquema')
     } finally {
@@ -1253,6 +1288,12 @@ export default function GeneratePage() {
       }
       setMentalOutline(data.schema as MentalOutline)
       setMentalOutlineSource('bookmarks') // Marcar como generado desde bookmarks
+      
+      // Abrir automáticamente en nueva pestaña
+      setTimeout(() => {
+        const url = window.location.href.split('?')[0] + '?view=outline'
+        window.open(url, '_blank', 'width=1600,height=1000')
+      }, 100) // Pequeño delay para asegurar que el estado se haya actualizado
     } catch (e: any) {
       setMentalOutlineError(e?.message || 'Error generando esquema desde bookmarks')
     } finally {
@@ -1879,12 +1920,6 @@ export default function GeneratePage() {
               {summLoading ? 'Resumiendo…' : 'Generar resumen'}
             </button>
           </div>
-          {summary && (
-            <div className="mt-3 grid gap-2">
-              <div className="font-medium">Resumen ({summary.tipo})</div>
-              <pre className="text-xs whitespace-pre-wrap bg-slate-50 p-2 rounded-lg border border-slate-200">{JSON.stringify(summary, null, 2)}</pre>
-            </div>
-          )}
         </div>
       </section> */}
 
@@ -2161,99 +2196,7 @@ export default function GeneratePage() {
               </div>
             )
           })()}
-          {mentalOutline && (
-            <div className="space-y-3">
-              <div className="flex flex-wrap items-center gap-2 text-xs">
-                <div className="flex rounded-lg border border-slate-300 bg-slate-100 p-1">
-                  <button
-                    type="button"
-                    onClick={() => setOutlineViewMode('tree')}
-                    className={`rounded-md px-2 py-1 ${outlineViewMode === 'tree' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}
-                  >
-                    Vista estructurada
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setOutlineViewMode('json')}
-                    className={`rounded-md px-2 py-1 ${outlineViewMode === 'json' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}
-                  >
-                    JSON
-                  </button>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => navigator.clipboard.writeText(JSON.stringify(mentalOutline, null, 2))}
-                  className="ml-auto px-2 py-1 rounded border border-slate-300 hover:bg-slate-100"
-                >
-                  Copiar JSON
-                </button>
-              </div>
-              {outlineViewMode === 'json' ? (
-                <pre className="max-h-[70vh] overflow-y-auto whitespace-pre-wrap rounded border border-slate-200 bg-slate-50 p-2 text-xs">
-{JSON.stringify(mentalOutline, null, 2)}
-                </pre>
-              ) : (
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <h2 className="text-sm font-bold text-slate-700 uppercase tracking-wide">Esquema estructurado</h2>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const url = window.location.href.split('?')[0] + '?view=outline'
-                        window.open(url, '_blank', 'width=1600,height=1000')
-                      }}
-                      className="text-xs px-3 py-1.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 transition-colors"
-                      title="Abrir esquema en nueva pestaña para mejor visualización"
-                    >
-                      🔗 Abrir en nueva pestaña
-                    </button>
-                  </div>
-                  <div className="flex flex-col lg:flex-row gap-6">
-                    {/* Columna izquierda: Árbol plegable */}
-                    <div className="w-full lg:w-80 lg:min-w-[280px] lg:max-w-[320px] flex-shrink-0">
-                      <div className="sticky top-0 bg-white z-10 pb-3 mb-3 border-b border-slate-200">
-                        <h3 className="text-sm font-bold text-slate-700 uppercase tracking-wide">Índice</h3>
-                      </div>
-                      <div className="max-h-[70vh] overflow-y-auto pr-2 scrollbar-thin scrollbar-thumb-slate-300 scrollbar-track-slate-100">
-                        <LegalOutlineTree 
-                          outline={mentalOutline} 
-                          onArticleSelect={(art, idx) => setSelectedArticle({ art, idx })}
-                          selectedArticleAnchor={selectedArticle?.art.anchor || null}
-                        />
-                      </div>
-                    </div>
-                    
-                    {/* Columna derecha: Detalle del artículo */}
-                    <div className="flex-1 min-w-0">
-                      <div className="max-h-[70vh] overflow-y-auto scrollbar-thin scrollbar-thumb-slate-300 scrollbar-track-slate-100">
-                        {selectedArticle ? (
-                          <ArticleDetail 
-                            art={selectedArticle.art}
-                            idx={selectedArticle.idx}
-                            pagesFull={pagesFull}
-                            pagesFullRaw={pagesFullRaw}
-                            frontMatterDropped={frontMatterDropped}
-                            pagesCount={pagesCount}
-                            sourceFromBookmarks={mentalOutlineSource === 'bookmarks'}
-                            mentalOutline={mentalOutline}
-                            lawName={lawName}
-                          />
-                        ) : (
-                          <div className="flex flex-col items-center justify-center h-full min-h-[400px] text-center p-8 bg-gradient-to-br from-slate-50 to-white rounded-xl border-2 border-dashed border-slate-300">
-                            <div className="text-5xl mb-4">📄</div>
-                            <h3 className="text-lg font-semibold text-slate-700 mb-2">Selecciona un artículo</h3>
-                            <p className="text-sm text-slate-500 max-w-sm">
-                              Haz clic en cualquier artículo del índice para ver su contenido y resumen aquí
-                            </p>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
+          {/* El esquema ya no se muestra aquí, se abre automáticamente en nueva pestaña */}
           {!mentalOutline && !mentalOutlineLoading && !mentalOutlineError && (
             <div className="text-xs text-slate-500">Sube un PDF y genera el esquema estructurado completo.</div>
           )}

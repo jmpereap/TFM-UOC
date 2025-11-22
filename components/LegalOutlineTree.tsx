@@ -181,7 +181,7 @@ function SectionNode({
   const label = resolveLabel('seccion', section.seccion_texto, ordinal)
 
   return (
-    <details open className="group/details">
+    <details className="group/details">
       <summary className="flex items-center gap-2 px-3 py-2 text-xs font-semibold uppercase text-slate-700 hover:text-slate-900 cursor-pointer list-none [&::-webkit-details-marker]:hidden border-l-2 border-slate-200 pl-5">
         <span className="text-slate-400 group-open/details:rotate-90 transition-transform duration-200 inline-block">▶</span>
         <span>SECCIÓN {ordinal}</span>
@@ -223,7 +223,7 @@ function ChapterNode({
   const label = resolveLabel('capitulo', chapter.capitulo_texto, ordinal)
 
   return (
-    <details open className="group/details">
+    <details className="group/details">
       <summary className="flex items-center gap-2 px-3 py-2 text-xs font-semibold uppercase text-slate-700 hover:text-slate-900 cursor-pointer list-none [&::-webkit-details-marker]:hidden border-l-2 border-indigo-200 pl-3">
         <span className="text-indigo-400 group-open/details:rotate-90 transition-transform duration-200 inline-block">▶</span>
         <span>CAPÍTULO {ordinal}</span>
@@ -277,7 +277,7 @@ function TitleNode({
     : null
 
   return (
-    <details open className="group/details">
+    <details className="group/details">
       <summary className="flex items-center gap-2 px-4 py-3 text-sm font-bold text-slate-800 hover:text-slate-900 cursor-pointer list-none [&::-webkit-details-marker]:hidden bg-gradient-to-r from-indigo-50 to-white rounded-lg border border-indigo-200 mb-2">
         <span className="text-indigo-500 group-open/details:rotate-90 transition-transform duration-200 inline-block text-lg">▶</span>
         <div className="flex-1">
