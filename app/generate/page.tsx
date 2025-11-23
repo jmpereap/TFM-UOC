@@ -767,6 +767,7 @@ export default function GeneratePage() {
     medio: number
     avanzado: number
   }>('tfm.difficultyDistribution', { basico: 4, medio: 4, avanzado: 4 })
+  const [preferredLevel, setPreferredLevel] = useLocalStorage<'basico' | 'medio' | 'avanzado' | null>('tfm.preferredLevel', null)
   
   // Ajustar distribución automáticamente cuando n cambia
   useEffect(() => {
@@ -1066,23 +1067,36 @@ export default function GeneratePage() {
       return
     }
     
-    // Validar y ajustar que la distribución de dificultad sume n
-    const distSum = difficultyDistribution.basico + difficultyDistribution.medio + difficultyDistribution.avanzado
-    let finalDistribution = { ...difficultyDistribution }
-    
-    if (distSum !== n) {
-      // Ajustar automáticamente si no coincide
-      const ratio = n / Math.max(1, distSum)
-      const newBasico = Math.round(difficultyDistribution.basico * ratio)
-      const newMedio = Math.round(difficultyDistribution.medio * ratio)
-      const newAvanzado = n - newBasico - newMedio
-      finalDistribution = {
-        basico: newBasico,
-        medio: newMedio,
-        avanzado: Math.max(0, newAvanzado)
+    // Si hay preferredLevel, usarlo; si no, usar difficultyDistribution
+    let requestBody: any = {
+      lawName,
+      n: Math.min(20, Math.max(1, n)),
+      blocks,
+    }
+
+    if (preferredLevel) {
+      // Usar nivel preferido: no enviar difficultyDistribution
+      requestBody.preferredLevel = preferredLevel
+    } else {
+      // Usar distribución manual: validar y ajustar que la distribución de dificultad sume n
+      const distSum = difficultyDistribution.basico + difficultyDistribution.medio + difficultyDistribution.avanzado
+      let finalDistribution = { ...difficultyDistribution }
+      
+      if (distSum !== n) {
+        // Ajustar automáticamente si no coincide
+        const ratio = n / Math.max(1, distSum)
+        const newBasico = Math.round(difficultyDistribution.basico * ratio)
+        const newMedio = Math.round(difficultyDistribution.medio * ratio)
+        const newAvanzado = n - newBasico - newMedio
+        finalDistribution = {
+          basico: newBasico,
+          medio: newMedio,
+          avanzado: Math.max(0, newAvanzado)
+        }
+        // Actualizar el estado para que se refleje en la UI
+        setDifficultyDistribution(finalDistribution)
       }
-      // Actualizar el estado para que se refleje en la UI
-      setDifficultyDistribution(finalDistribution)
+      requestBody.difficultyDistribution = finalDistribution
     }
     
     setGenError(null)
@@ -1096,12 +1110,7 @@ export default function GeneratePage() {
       const res = await fetch('/api/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          lawName, 
-          n: Math.min(20, Math.max(1, n)), 
-          blocks,
-          difficultyDistribution: finalDistribution
-        }),
+        body: JSON.stringify(requestBody),
       })
       const data = await res.json()
       if (!data.ok) throw new Error(data.error || 'Fallo en /api/generate')
@@ -1843,6 +1852,27 @@ export default function GeneratePage() {
                   </button>
                 </form>
                 <span className="mt-1 text-[11px] text-slate-500">Rango {MIN_Q}–{MAX_Q}</span>
+                <div className="mt-3 flex flex-col gap-1">
+                  <label className="text-xs font-medium text-slate-700">Nivel preferido</label>
+                  <select
+                    value={preferredLevel ?? ''}
+                    onChange={(e) => {
+                      const value = e.target.value
+                      setPreferredLevel(value === '' ? null : (value as 'basico' | 'medio' | 'avanzado'))
+                    }}
+                    className="h-9 rounded-lg border border-slate-300 px-2 text-sm bg-white"
+                  >
+                    <option value="">Sin preferencia</option>
+                    <option value="basico">Básico (≥95%)</option>
+                    <option value="medio">Medio (≥90%)</option>
+                    <option value="avanzado">Avanzado (≥90%)</option>
+                  </select>
+                  {preferredLevel && (
+                    <span className="text-[11px] text-slate-600 mt-0.5">
+                      Se generarán al menos {Math.ceil(n * (preferredLevel === 'basico' ? 0.95 : 0.90))} preguntas de nivel {preferredLevel === 'basico' ? 'Básico' : preferredLevel === 'medio' ? 'Medio' : 'Avanzado'}
+                    </span>
+                  )}
+                </div>
                 </div>
               </div>
             </div>

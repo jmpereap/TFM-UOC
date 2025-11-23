@@ -73,9 +73,18 @@ function extractJsonArray(text: string): unknown[] {
   return []
 }
 
-export async function callModel(prompt: string, timeoutMs = 20000): Promise<MCQItem[]> {
+export async function callModel(prompt: string, timeoutMs = 30000): Promise<MCQItem[]> {
+  const startTime = Date.now()
   const ctrl = new AbortController()
-  const to = setTimeout(() => ctrl.abort(), timeoutMs)
+  const to = setTimeout(() => {
+    const elapsed = Date.now() - startTime
+    logEvent('model.timeout', {
+      timeoutMs,
+      elapsedMs: elapsed,
+      promptLength: prompt.length,
+    })
+    ctrl.abort()
+  }, timeoutMs)
   try {
     const res = await client.chat.completions.create(
       {
@@ -120,7 +129,24 @@ export async function callModel(prompt: string, timeoutMs = 20000): Promise<MCQI
         parrafo: x?.referencia?.parrafo ? String(x?.referencia?.parrafo) : undefined,
       },
     }))
+    const duration = Date.now() - startTime
+    logEvent('model.success', {
+      durationMs: duration,
+      itemsCount: items.length,
+      promptLength: prompt.length,
+    })
     return items
+  } catch (err) {
+    const duration = Date.now() - startTime
+    const errorMessage = err instanceof Error ? err.message : String(err)
+    logEvent('model.error', {
+      error: errorMessage,
+      durationMs: duration,
+      timeoutMs,
+      isAborted: errorMessage.includes('aborted'),
+      promptLength: prompt.length,
+    })
+    throw err
   } finally {
     clearTimeout(to)
   }

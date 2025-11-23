@@ -8,9 +8,10 @@ export type BuildPromptParams = {
     medio: number
     avanzado: number
   }
+  preferredLevel?: 'basico' | 'medio' | 'avanzado'
 }
 
-export function buildPrompt({ lawName, pagesRange, blockText, n, difficultyDistribution }: BuildPromptParams) {
+export function buildPrompt({ lawName, pagesRange, blockText, n, difficultyDistribution, preferredLevel }: BuildPromptParams) {
   const distText = difficultyDistribution
     ? `\nDistribución de dificultad requerida:
 - ${difficultyDistribution.basico} pregunta(s) de nivel "basico"
@@ -18,10 +19,17 @@ export function buildPrompt({ lawName, pagesRange, blockText, n, difficultyDistr
 - ${difficultyDistribution.avanzado} pregunta(s) de nivel "avanzado"`
     : ''
 
+  const preferredLevelText = preferredLevel
+    ? (() => {
+        const percentage = preferredLevel === 'basico' ? '95%' : '90%'
+        return `\n\nIMPORTANTE - Nivel preferido: La mayoría (al menos ${percentage}) de las preguntas deben ser de nivel "${preferredLevel}". El resto puede ser de otros niveles si es necesario, pero prioriza el nivel "${preferredLevel}".`
+      })()
+    : ''
+
   return `
 Eres un sistema que genera preguntas tipo test sobre legislación española.
 
-Objetivo: crear ${n} preguntas (máx. 4 opciones A–D, exactamente 1 correcta), sin repetición, basadas SOLO en el texto del bloque proporcionado.${distText}
+Objetivo: crear ${n} preguntas (máx. 4 opciones A–D, exactamente 1 correcta), sin repetición, basadas SOLO en el texto del bloque proporcionado.${distText}${preferredLevelText}
 
 NIVELES DE DIFICULTAD
 
