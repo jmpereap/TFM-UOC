@@ -1,12 +1,14 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import type { MCQItem, OptionKey } from '@/types/mcq'
 import type { MentalOutline, DisposicionItem } from '@/types/mentalOutline'
 import MCQCard from '@/components/MCQCard'
 import DragDropUpload from '@/components/DragDropUpload'
 import Modal from '@/components/Modal'
 import { useLocalStorage } from '@/hooks/useLocalStorage'
+import { useAuth } from '@/hooks/useAuth'
 import LegalOutlineTree from '@/components/LegalOutlineTree'
 
 type Result = { isCorrect: boolean }
@@ -739,6 +741,9 @@ function OutlineTree({ outline, pagesFull, pagesFullRaw, frontMatterDropped, pag
 }
 
 export default function GeneratePage() {
+  const router = useRouter()
+  const { isAuthenticated, username, logout } = useAuth()
+
   // PDF/bloques
   const [pdfFile, setPdfFile] = useState<File | null>(null)
   const [blocks, setBlocks] = useState<any[]>([])
@@ -768,6 +773,25 @@ export default function GeneratePage() {
     avanzado: number
   }>('tfm.difficultyDistribution', { basico: 4, medio: 4, avanzado: 4 })
   const [preferredLevel, setPreferredLevel] = useLocalStorage<'basico' | 'medio' | 'avanzado' | null>('tfm.preferredLevel', null)
+  const [showDifficultyTooltip, setShowDifficultyTooltip] = useState(false)
+  const difficultyTooltipRef = useRef<HTMLDivElement>(null)
+  
+  // Cerrar tooltip al hacer click fuera
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (difficultyTooltipRef.current && !difficultyTooltipRef.current.contains(event.target as Node)) {
+        setShowDifficultyTooltip(false)
+      }
+    }
+
+    if (showDifficultyTooltip) {
+      document.addEventListener('mousedown', handleClickOutside)
+    }
+
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside)
+    }
+  }, [showDifficultyTooltip])
   
   // Ajustar distribución automáticamente cuando n cambia
   useEffect(() => {
@@ -814,6 +838,13 @@ export default function GeneratePage() {
   const [bookmarks, setBookmarks] = useState<any[]>([]) // Bookmarks del PDF
   const [mentalOutlineSource, setMentalOutlineSource] = useState<'bookmarks' | 'direct' | null>(null) // Origen del esquema mental
   const [isOutlineOnlyView, setIsOutlineOnlyView] = useState(false) // Modo "solo esquema" (vista en nueva pestaña)
+
+  // Verificar autenticación
+  useEffect(() => {
+    if (isAuthenticated === false) {
+      router.push('/login')
+    }
+  }, [isAuthenticated, router])
 
   // Detectar si estamos en modo "solo esquema" (solo en el cliente)
   useEffect(() => {
@@ -1763,10 +1794,36 @@ export default function GeneratePage() {
     )
   }
 
+  // Mostrar loading mientras se verifica la autenticación
+  if (isAuthenticated === null) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-white">
+        <div className="text-slate-600">Cargando...</div>
+      </div>
+    )
+  }
+
+  if (isAuthenticated === false) {
+    return null // Se está redirigiendo
+  }
+
   return (
     <div className="min-h-screen bg-white">
       <section className="sticky top-0 z-30 bg-white/85 backdrop-blur supports-[backdrop-filter]:bg-white/60 border-b">
         <div className="mx-auto max-w-5xl px-3 py-2">
+          <div className="flex justify-end mb-2">
+            <div className="flex items-center gap-3">
+              {username && (
+                <span className="text-xs text-slate-600">Usuario: {username}</span>
+              )}
+              <button
+                onClick={logout}
+                className="text-xs text-slate-600 hover:text-slate-800 underline"
+              >
+                Cerrar sesión
+              </button>
+            </div>
+          </div>
           <div className="grid grid-cols-1 md:grid-cols-12 gap-2 items-start">
             <div className="md:col-span-6 self-start">
               <DragDropUpload
@@ -1853,7 +1910,39 @@ export default function GeneratePage() {
                 </form>
                 <span className="mt-1 text-[11px] text-slate-500">Rango {MIN_Q}–{MAX_Q}</span>
                 <div className="mt-3 flex flex-col gap-1">
-                  <label className="text-xs font-medium text-slate-700">Nivel preferido</label>
+                  <div className="flex items-center gap-1.5 relative" ref={difficultyTooltipRef}>
+                    <label className="text-xs font-medium text-slate-700">Dificultad preguntas</label>
+                    <button
+                      type="button"
+                      onClick={() => setShowDifficultyTooltip(!showDifficultyTooltip)}
+                      className="w-4 h-4 rounded-full bg-slate-200 hover:bg-slate-300 flex items-center justify-center text-[10px] font-semibold text-slate-600 hover:text-slate-700 transition-colors"
+                      aria-label="Información sobre dificultad de preguntas"
+                    >
+                      i
+                    </button>
+                    {showDifficultyTooltip && (
+                      <div className="absolute left-0 top-6 z-50 w-72 rounded-lg border border-slate-300 bg-white p-3 shadow-lg text-xs text-slate-700">
+                        <ul className="space-y-2 list-none">
+                          <li>
+                            <span className="font-medium">En nivel básico</span> se incluyen mínimo 95% de preguntas de ese nivel, el resto de nivel medio.
+                          </li>
+                          <li>
+                            <span className="font-medium">En nivel medio</span> se incluyen mínimo 90% de preguntas de ese nivel, el resto de nivel avanzado.
+                          </li>
+                          <li>
+                            <span className="font-medium">En nivel avanzado</span> se incluyen mínimo 90% de preguntas de ese nivel, el resto de nivel medio.
+                          </li>
+                        </ul>
+                        <button
+                          type="button"
+                          onClick={() => setShowDifficultyTooltip(false)}
+                          className="mt-2 text-[10px] text-slate-500 hover:text-slate-700 underline"
+                        >
+                          Cerrar
+                        </button>
+                      </div>
+                    )}
+                  </div>
                   <select
                     value={preferredLevel ?? ''}
                     onChange={(e) => {
@@ -1863,9 +1952,9 @@ export default function GeneratePage() {
                     className="h-9 rounded-lg border border-slate-300 px-2 text-sm bg-white"
                   >
                     <option value="">Sin preferencia</option>
-                    <option value="basico">Básico (≥95%)</option>
-                    <option value="medio">Medio (≥90%)</option>
-                    <option value="avanzado">Avanzado (≥90%)</option>
+                    <option value="basico">Básico</option>
+                    <option value="medio">Medio</option>
+                    <option value="avanzado">Avanzado</option>
                   </select>
                   {preferredLevel && (
                     <span className="text-[11px] text-slate-600 mt-0.5">
@@ -1874,6 +1963,129 @@ export default function GeneratePage() {
                   )}
                 </div>
                 </div>
+              </div>
+            </div>
+            <div className="md:col-span-12 mt-2">
+              <div className="rounded-xl border border-slate-200 p-3 text-sm space-y-3 bg-white text-slate-800">
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="font-medium text-sm">Esquema estructurado</div>
+                  <div className="ml-auto flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={generateMentalOutlineFromBookmarks}
+                      disabled={(() => {
+                        if (mentalOutlineLoading || !bookmarks.length || !pagesCount) return true
+                        // Contar todos los bookmarks recursivamente (incluyendo hijos)
+                        const countAllBookmarks = (items: any[]): number => {
+                          let count = 0
+                          for (const item of items) {
+                            count++
+                            if (item.children && Array.isArray(item.children) && item.children.length > 0) {
+                              count += countAllBookmarks(item.children)
+                            }
+                          }
+                          return count
+                        }
+                        const totalBookmarks = countAllBookmarks(bookmarks)
+                        return totalBookmarks <= pagesCount
+                      })()}
+                      className="h-9 px-3 rounded-lg bg-purple-600 text-white text-sm disabled:opacity-50"
+                      title={(() => {
+                        if (!bookmarks.length) return 'No hay bookmarks disponibles'
+                        if (!pagesCount) return 'No se conoce el número de páginas'
+                        const countAllBookmarks = (items: any[]): number => {
+                          let count = 0
+                          for (const item of items) {
+                            count++
+                            if (item.children && Array.isArray(item.children) && item.children.length > 0) {
+                              count += countAllBookmarks(item.children)
+                            }
+                          }
+                          return count
+                        }
+                        const totalBookmarks = countAllBookmarks(bookmarks)
+                        if (totalBookmarks <= pagesCount) {
+                          return `Los bookmarks (${totalBookmarks}) deben ser más que las páginas (${pagesCount})`
+                        }
+                        return "Genera el esquema mental desde los bookmarks/marcadores del PDF"
+                      })()}
+                    >
+                      {mentalOutlineLoading ? 'Generando…' : 'Desde Bookmarks'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={generateMentalOutlineDirect}
+                      disabled={mentalOutlineLoading || !pagesFull.length}
+                      className="h-9 px-3 rounded-lg bg-green-600 text-white text-sm disabled:opacity-50"
+                      title="Genera el esquema mental directamente desde el índice del PDF sin usar IA"
+                    >
+                      {mentalOutlineLoading ? 'Generando…' : 'Generar'}
+                    </button>
+                    {/* Botones ocultos */}
+                    {/* <button
+                      type="button"
+                      onClick={generateMentalOutlineSingle}
+                      disabled={mentalOutlineLoading || !pagesFull.length}
+                      className="h-9 px-3 rounded-lg bg-sky-600 text-white text-sm disabled:opacity-50"
+                    >
+                      {mentalOutlineLoading ? 'Generando…' : 'Una llamada'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={generateMentalOutlineChunks}
+                      disabled={mentalOutlineLoading || !pagesFull.length}
+                      className="h-9 px-3 rounded-lg bg-indigo-600 text-white text-sm disabled:opacity-50"
+                    >
+                      {mentalOutlineLoading ? 'Generando…' : `Por lotes (hasta ${MENTAL_OUTLINE_CHUNK_SIZES[0]} pág.)`}
+                    </button> */}
+                  </div>
+                </div>
+                {mentalOutlineProgress && (
+                  <div className="text-xs text-slate-600">
+                    Procesadas {mentalOutlineProgress.processed} / {mentalOutlineProgress.total} páginas
+                    {mentalOutlineProgress.lastChunk > 0 && ` · Último lote: ${mentalOutlineProgress.lastChunk} pág.`}
+                  </div>
+                )}
+                {mentalOutlineError && <div className="text-xs text-red-500">{mentalOutlineError}</div>}
+                {(() => {
+                  // Contar todos los bookmarks recursivamente (incluyendo hijos)
+                  const countAllBookmarks = (items: any[]): number => {
+                    let count = 0
+                    for (const item of items) {
+                      count++
+                      if (item.children && Array.isArray(item.children) && item.children.length > 0) {
+                        count += countAllBookmarks(item.children)
+                      }
+                    }
+                    return count
+                  }
+                  const totalBookmarks = bookmarks.length > 0 ? countAllBookmarks(bookmarks) : 0
+                  const isAvailable = pagesCount && totalBookmarks > pagesCount
+                  
+                  if (bookmarks.length === 0 || !isAvailable) {
+                    return (
+                      <div className="text-xs text-slate-600 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
+                        <div className="flex items-center gap-2">
+                          <span className="text-red-600 font-bold">✗</span>
+                          <span className="font-medium">Deshabilitado Bookmarks</span>
+                        </div>
+                      </div>
+                    )
+                  }
+                  
+                  return (
+                    <div className="text-xs text-slate-700 bg-purple-50 border border-purple-200 rounded-lg px-3 py-2">
+                      <div className="flex items-center gap-2">
+                        <span className="text-purple-600 font-bold">✓</span>
+                        <span className="font-medium">Bookmarks disponibles</span>
+                      </div>
+                    </div>
+                  )
+                })()}
+                {/* El esquema ya no se muestra aquí, se abre automáticamente en nueva pestaña */}
+                {!mentalOutline && !mentalOutlineLoading && !mentalOutlineError && (
+                  <div className="text-xs text-slate-500">Sube un PDF y genera el esquema estructurado completo.</div>
+                )}
               </div>
             </div>
           </div>
@@ -2108,130 +2320,6 @@ export default function GeneratePage() {
           ))}
         </div>
       </Modal>
-
-      <section className="mx-auto max-w-5xl px-3 pb-6">
-        <div className="rounded-xl border border-slate-200 p-3 text-sm space-y-3 bg-white text-slate-800">
-          <div className="flex flex-wrap items-center gap-2">
-            <div className="font-medium text-sm">Esquema estructurado</div>
-            <div className="ml-auto flex flex-wrap gap-2">
-              <button
-                type="button"
-                onClick={generateMentalOutlineFromBookmarks}
-                disabled={(() => {
-                  if (mentalOutlineLoading || !bookmarks.length || !pagesCount) return true
-                  // Contar todos los bookmarks recursivamente (incluyendo hijos)
-                  const countAllBookmarks = (items: any[]): number => {
-                    let count = 0
-                    for (const item of items) {
-                      count++
-                      if (item.children && Array.isArray(item.children) && item.children.length > 0) {
-                        count += countAllBookmarks(item.children)
-                      }
-                    }
-                    return count
-                  }
-                  const totalBookmarks = countAllBookmarks(bookmarks)
-                  return totalBookmarks <= pagesCount
-                })()}
-                className="h-9 px-3 rounded-lg bg-purple-600 text-white text-sm disabled:opacity-50"
-                title={(() => {
-                  if (!bookmarks.length) return 'No hay bookmarks disponibles'
-                  if (!pagesCount) return 'No se conoce el número de páginas'
-                  const countAllBookmarks = (items: any[]): number => {
-                    let count = 0
-                    for (const item of items) {
-                      count++
-                      if (item.children && Array.isArray(item.children) && item.children.length > 0) {
-                        count += countAllBookmarks(item.children)
-                      }
-                    }
-                    return count
-                  }
-                  const totalBookmarks = countAllBookmarks(bookmarks)
-                  if (totalBookmarks <= pagesCount) {
-                    return `Los bookmarks (${totalBookmarks}) deben ser más que las páginas (${pagesCount})`
-                  }
-                  return "Genera el esquema mental desde los bookmarks/marcadores del PDF"
-                })()}
-              >
-                {mentalOutlineLoading ? 'Generando…' : 'Desde Bookmarks'}
-              </button>
-              <button
-                type="button"
-                onClick={generateMentalOutlineDirect}
-                disabled={mentalOutlineLoading || !pagesFull.length}
-                className="h-9 px-3 rounded-lg bg-green-600 text-white text-sm disabled:opacity-50"
-                title="Genera el esquema mental directamente desde el índice del PDF sin usar IA"
-              >
-                {mentalOutlineLoading ? 'Generando…' : 'Generar'}
-              </button>
-              {/* Botones ocultos */}
-              {/* <button
-                type="button"
-                onClick={generateMentalOutlineSingle}
-                disabled={mentalOutlineLoading || !pagesFull.length}
-                className="h-9 px-3 rounded-lg bg-sky-600 text-white text-sm disabled:opacity-50"
-              >
-                {mentalOutlineLoading ? 'Generando…' : 'Una llamada'}
-              </button>
-              <button
-                type="button"
-                onClick={generateMentalOutlineChunks}
-                disabled={mentalOutlineLoading || !pagesFull.length}
-                className="h-9 px-3 rounded-lg bg-indigo-600 text-white text-sm disabled:opacity-50"
-              >
-                {mentalOutlineLoading ? 'Generando…' : `Por lotes (hasta ${MENTAL_OUTLINE_CHUNK_SIZES[0]} pág.)`}
-              </button> */}
-            </div>
-          </div>
-          {mentalOutlineProgress && (
-            <div className="text-xs text-slate-600">
-              Procesadas {mentalOutlineProgress.processed} / {mentalOutlineProgress.total} páginas
-              {mentalOutlineProgress.lastChunk > 0 && ` · Último lote: ${mentalOutlineProgress.lastChunk} pág.`}
-            </div>
-          )}
-          {mentalOutlineError && <div className="text-xs text-red-500">{mentalOutlineError}</div>}
-          {(() => {
-            // Contar todos los bookmarks recursivamente (incluyendo hijos)
-            const countAllBookmarks = (items: any[]): number => {
-              let count = 0
-              for (const item of items) {
-                count++
-                if (item.children && Array.isArray(item.children) && item.children.length > 0) {
-                  count += countAllBookmarks(item.children)
-                }
-              }
-              return count
-            }
-            const totalBookmarks = bookmarks.length > 0 ? countAllBookmarks(bookmarks) : 0
-            const isAvailable = pagesCount && totalBookmarks > pagesCount
-            
-            if (bookmarks.length === 0 || !isAvailable) {
-              return (
-                <div className="text-xs text-slate-600 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
-                  <div className="flex items-center gap-2">
-                    <span className="text-red-600 font-bold">✗</span>
-                    <span className="font-medium">Deshabilitado Bookmarks</span>
-                  </div>
-                </div>
-              )
-            }
-            
-            return (
-              <div className="text-xs text-slate-700 bg-purple-50 border border-purple-200 rounded-lg px-3 py-2">
-                <div className="flex items-center gap-2">
-                  <span className="text-purple-600 font-bold">✓</span>
-                  <span className="font-medium">Bookmarks disponibles</span>
-                </div>
-              </div>
-            )
-          })()}
-          {/* El esquema ya no se muestra aquí, se abre automáticamente en nueva pestaña */}
-          {!mentalOutline && !mentalOutlineLoading && !mentalOutlineError && (
-            <div className="text-xs text-slate-500">Sube un PDF y genera el esquema estructurado completo.</div>
-          )}
-        </div>
-      </section>
     </div>
   )
 }

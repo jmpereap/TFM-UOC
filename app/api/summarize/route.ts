@@ -7,6 +7,7 @@ import { callModelJSON } from '@/lib/qa/callModel'
 import { segmentLegalUnits } from '@/lib/utils/legalSegment'
 import { buildMapPromptLite, buildMapPromptRich, buildReducePrompt, buildFastStructuredPromptV2 } from '@/lib/qa/promptsSummary'
 import { pickStratified, extractiveSlice } from '@/lib/utils/fastSummary'
+import { detectFrontMatter, defaultFrontmatterConfig } from '@/lib/legal/frontmatter'
 
 type Block = { index: number; startPage: number; endPage: number; text: string }
 
@@ -38,20 +39,30 @@ export async function POST(req: NextRequest) {
     const MAP_TIMEOUT_MS = Number(process.env.SUMMARY_MAP_TIMEOUT_MS ?? 28000)
     const GROUP_SIZE = Number(process.env.SUMMARY_GROUP_SIZE ?? 6)
 
-    // Fuente de páginas preferente: pagesFull; fallback a blocks
-    const pages = hasPages
+    const rawPages = hasPages
       ? (pagesFull as Array<{ num: number; text: string }>)
       : (blocks as Block[]).map((b, i) => ({ num: b.startPage ?? i + 1, text: (b as any).text }))
 
+    const frontCfg = defaultFrontmatterConfig()
+    const frontMatter = detectFrontMatter(rawPages, frontCfg)
+    const firstBodyIdx = rawPages.findIndex((p) => /Art[íi]culo\s+1\b/i.test(p.text) || /T[ÍI]TULO\s+PRELIMINAR/i.test(p.text))
+    if (firstBodyIdx > 0) {
+      for (let i = 0; i < firstBodyIdx; i += 1) {
+        frontMatter.add(rawPages[i].num)
+      }
+    }
+    const pages = rawPages.filter((p) => !frontMatter.has(p.num))
+    const effectivePages = pages.length ? pages : rawPages
+
     // Coherencia básica nombre/contenido (p.ej., CE vs Estatut)
     try {
-      const head = pages.slice(0, 5).map((p) => p.text).join('\n').toLowerCase()
+      const head = effectivePages.slice(0, 5).map((p) => p.text).join('\n').toLowerCase()
       if (/constituci[óo]n espa[nñ]ola/.test(head) && /estatuto/i.test(String(lawName))) {
         return NextResponse.json({ ok: false, error: 'Nombre vs contenido no coinciden (CE detectada).' }, { status: 422 })
       }
     } catch {}
 
-    const units = segmentLegalUnits(pages).map((u) => ({
+    const units = segmentLegalUnits(effectivePages).map((u) => ({
       ...u,
       startPage: u.startPage ?? 1,
       endPage: u.endPage ?? u.startPage ?? 1,

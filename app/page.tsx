@@ -1,30 +1,39 @@
-import Link from 'next/link'
+'use client';
+
+import { useEffect } from 'react'
+import { useRouter } from 'next/navigation'
+import { useAuth } from '@/hooks/useAuth'
 
 export default function HomePage() {
-  return (
-    <main className="mx-auto max-w-3xl p-6">
-      <h1 className="text-2xl font-semibold">TFM UOC IA</h1>
-      <p className="mt-2 text-gray-600">Proyecto base listo para extender.</p>
+  const router = useRouter()
+  const { isAuthenticated } = useAuth()
 
-      <div className="mt-8 grid grid-cols-1 gap-4 sm:grid-cols-2">
-        <Link
-          href="/upload"
-          className="rounded border p-4 transition hover:bg-gray-50"
-        >
-          <h2 className="font-medium">Subir PDF y ver bloques →</h2>
-          <p className="text-sm text-gray-600">Parseo y división en bloques.</p>
-        </Link>
+  useEffect(() => {
+    if (isAuthenticated === false) {
+      router.push('/login')
+    } else if (isAuthenticated === true) {
+      router.push('/generate')
+    }
+  }, [isAuthenticated, router])
 
-        <Link
-          href="/generate"
-          className="rounded border p-4 transition hover:bg-gray-50"
-        >
-          <h2 className="font-medium">Generar preguntas →</h2>
-          <p className="text-sm text-gray-600">Demo con resultados mock.</p>
-        </Link>
+  // Mostrar loading mientras se verifica la autenticación
+  if (isAuthenticated === null) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="text-slate-600">Cargando...</div>
       </div>
-    </main>
-  )
+    )
+  }
+
+  return null
 }
+
+
+
+
+
+
+
+
 
 
