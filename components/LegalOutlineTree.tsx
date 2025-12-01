@@ -285,9 +285,31 @@ function TitleNode({
 }) {
   const ordinal = resolveOrdinal('titulo', titulo.ordinal, titulo.titulo_texto, index)
   const label = resolveLabel('titulo', titulo.titulo_texto, ordinal)
-  const displayPages = Array.isArray(titulo.pages) && titulo.pages.length > 0 
-    ? formatPages([titulo.pages[0]]) 
+  const displayPages = Array.isArray(titulo.pages) && titulo.pages.length > 0
+    ? formatPages([titulo.pages[0]])
     : null
+
+  // No mostrar títulos “vacíos” que no tienen ningún artículo
+  const hasDirectArticles =
+    Array.isArray(titulo.articulos) && titulo.articulos.length > 0
+
+  const hasArticlesInChapters =
+    Array.isArray(titulo.capitulos) &&
+    titulo.capitulos.some((cap) => {
+      const capHasDirect =
+        Array.isArray(cap.articulos) && cap.articulos.length > 0
+      const capHasInSections =
+        Array.isArray(cap.secciones) &&
+        cap.secciones.some(
+          (sec) => Array.isArray(sec.articulos) && sec.articulos.length > 0,
+        )
+      return capHasDirect || capHasInSections
+    })
+
+  if (!hasDirectArticles && !hasArticlesInChapters) {
+    // Título sin contenido real → no lo mostramos
+    return null
+  }
 
   return (
     <details className="group/details">

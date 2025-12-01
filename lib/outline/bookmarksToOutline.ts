@@ -172,7 +172,9 @@ export function convertBookmarksToMentalOutline(
       return
     }
 
-    // TÍTULO (aceptar con o sin acentos)
+    // TÍTULO (aceptar con o sin acentos). Solo lo consideramos título si la línea
+	// empieza por "TÍTULO ..." (tras espacios o viñetas), para evitar rúbricas
+	// como "Disposición final segunda. Título competencial."
     const isTitulo = tituloPattern.test(title) || tituloPatternNoAccent.test(title)
     if (isTitulo) {
       // Intentar extraer ordinal con ambos patrones
