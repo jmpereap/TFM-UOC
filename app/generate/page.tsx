@@ -140,7 +140,14 @@ function normalizeArticleHeading(text: string | undefined | null, number: string
 
 function normalizeDispositionNumber(item: DisposicionItem, fallbackIndex: number) {
   const cleaned = item.numero?.replace(/\?/g, '').trim()
-  if (cleaned) return cleaned
+  if (cleaned) {
+    // Extraer solo la parte final (ej. "primera" de "Disposición transitoria primera")
+    const m = cleaned.match(/Disposici[óo]n\s+(?:Adicional|Transitoria|Derogatoria|Final)\s+(.+)/i)
+    if (m && m[1]) {
+      return m[1].replace(/\.$/, '').trim()
+    }
+    return cleaned
+  }
   const match = item.texto_encabezado?.match(DISPOSITION_REGEX)
   if (match && match[2]) {
     return match[2].replace(/\.$/, '').trim()
@@ -152,6 +159,45 @@ function normalizeDispositionHeading(prefix: string, item: DisposicionItem, numb
   const cleaned = item.texto_encabezado?.trim()
   if (cleaned && !cleaned.includes('?')) return cleaned
   return `Disposición ${prefix} ${number}`
+}
+
+// Función para formatear el resumen añadiendo saltos de línea entre apartados y letras
+function formatResumen(text: string): string {
+  if (!text || !text.trim()) return text
+  
+  // Normalizar espacios múltiples
+  let formatted = text.replace(/\s+/g, ' ').trim()
+  
+  // Añadir saltos de línea antes de apartados numerados (1., 2., 3., etc.)
+  // Buscar patrones como ". 1." o ": 2." o "; 3." pero NO "artículo 2.2"
+  formatted = formatted.replace(/([.:;])\s+(\d+\.\s+)/g, (match, delimiter, numero) => {
+    // Buscar hacia atrás para ver si es una referencia
+    const matchIndex = formatted.indexOf(match)
+    const beforeText = formatted.substring(Math.max(0, matchIndex - 30), matchIndex).toLowerCase()
+    
+    // Verificar si es parte de una referencia
+    const esReferencia = /\b(art[íi]culo|apartado|p[áa]rrafo|inciso|numeral|punto|reglamento|ley|decreto|orden|resoluci[óo]n|disposici[óo]n)\s+\d+\.?\s*$/.test(beforeText.trim())
+    
+    if (esReferencia) {
+      // Es una referencia, mantener sin salto de línea
+      return delimiter + ' ' + numero
+    } else {
+      // Es un apartado, añadir salto de línea
+      return delimiter + '\n\n' + numero
+    }
+  })
+  
+  // Añadir saltos de línea antes de letras (a), b), c), etc.)
+  // Solo si están después de delimitadores (punto, dos puntos, punto y coma)
+  formatted = formatted.replace(/([.:;])\s+([a-z]\)\s+)/gi, '$1\n\n$2')
+  
+  // Limpiar saltos de línea múltiples (máximo 2 seguidos)
+  formatted = formatted.replace(/\n{3,}/g, '\n\n')
+  
+  // Limpiar espacios al inicio y final
+  formatted = formatted.trim()
+  
+  return formatted
 }
 
 // Componente para mostrar el detalle del artículo seleccionado
@@ -167,7 +213,7 @@ function ArticleDetail({ art, idx, pagesFull, pagesFullRaw, frontMatterDropped, 
     setResumen(null)
     setLoading(false)
     
-    // Cargar el resumen del nuevo artículo
+    // Cargar el resumen del nuevo artículo usando IA
     const loadArticleSummary = async () => {
       setLoading(true)
 
@@ -175,74 +221,20 @@ function ArticleDetail({ art, idx, pagesFull, pagesFullRaw, frontMatterDropped, 
         const numeroMatch = art.numero.match(/(\d+|[IVXLCDM]+|bis|ter)/i)
         const articuloNumero = numeroMatch ? numeroMatch[1] : art.numero.replace(/Art[íi]culo\s+/i, '').trim()
 
-        let firstRealPage: number | null = null
-        const articuloPaginaReal = art.pagina_articulo || 0
+        // Obtener el nombre de la ley desde lawName prop o desde mentalOutline metadata
+        const lawNameToUse = lawName || mentalOutline?.metadata?.document_title || mentalOutline?.metadata?.source || 'Ley'
 
-        if (articuloPaginaReal > pagesFull.length && pagesCount && pagesCount > pagesFull.length) {
-          if (pagesFullRaw && pagesFullRaw.length === pagesFull.length) {
-            firstRealPage = 1
-          } else {
-            const diff = (pagesFullRaw?.length || pagesFull.length) - pagesFull.length
-            firstRealPage = diff > 0 ? diff + 1 : 1
-          }
-        } else if (frontMatterDropped && frontMatterDropped.length > 0) {
-          const lastFrontMatterPage = Math.max(...frontMatterDropped)
-          firstRealPage = lastFrontMatterPage + 1
-        } else if (pagesCount && pagesCount > 0) {
-          if (pagesFullRaw && pagesFullRaw.length > 0) {
-            const firstRawPageNum = pagesFullRaw[0]?.num || 1
-            if (firstRawPageNum === 1 && pagesFullRaw.length < pagesCount) {
-              firstRealPage = 1
-            } else if (firstRawPageNum > 1) {
-              firstRealPage = firstRawPageNum
-            }
-          } else {
-            const firstFullPageNum = pagesFull[0]?.num || 1
-            if (firstFullPageNum === 1 && pagesFull.length < pagesCount) {
-              firstRealPage = 1
-            } else {
-              firstRealPage = firstFullPageNum
-            }
-          }
-        } else if (pagesFullRaw && pagesFullRaw.length > 0 && pagesFull.length > 0) {
-          const firstFullPageNum = pagesFull[0]?.num || 1
-          const firstRawPageNum = pagesFullRaw[0]?.num || 1
-
-          if (firstFullPageNum > 1) {
-            firstRealPage = firstFullPageNum
-          } else if (firstFullPageNum === 1 && firstRawPageNum === 1) {
-            let foundIndex = -1
-            const firstFullText = pagesFull[0]?.text?.substring(0, 100) || ''
-            if (firstFullText) {
-              foundIndex = pagesFullRaw.findIndex(p => {
-                const rawText = p.text?.substring(0, 100) || ''
-                return rawText === firstFullText || rawText.includes(firstFullText.substring(0, 50))
-              })
-            }
-            
-            if (foundIndex >= 0) {
-              firstRealPage = pagesFullRaw[foundIndex]?.num || (foundIndex + 1)
-            } else {
-              const frontMatterCount = pagesFullRaw.length - pagesFull.length
-              firstRealPage = frontMatterCount > 0 ? frontMatterCount + 1 : 1
-            }
-          } else {
-            firstRealPage = 1
-          }
-        }
-
-        const response = await fetch('/api/mental-outline/extract-article', {
+        // Llamar al nuevo endpoint con IA
+        const response = await fetch('/api/mental-outline/extract-article-ai', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
+            lawName: lawNameToUse,
+            articleNumber: articuloNumero,
             pagesFull: pagesFull,
             pagesFullRaw: pagesFullRaw && pagesFullRaw.length > 0 ? pagesFullRaw : null,
-            totalPagesPDF: pagesCount,
-            articuloNumero: articuloNumero,
-            articuloPagina: art.pagina_articulo,
-            firstRealPage: firstRealPage,
-            frontMatterDropped: (frontMatterDropped && frontMatterDropped.length > 0) ? frontMatterDropped : null,
-            sourceFromBookmarks: sourceFromBookmarks || false // Indicar si viene desde bookmarks
+            articuloPagina: art.pagina_articulo || 0,
+            sourceFromBookmarks: sourceFromBookmarks || false
           })
         })
 
@@ -251,20 +243,26 @@ function ArticleDetail({ art, idx, pagesFull, pagesFullRaw, frontMatterDropped, 
           throw new Error(data.error || `Error ${response.status}: ${response.statusText}`)
         }
 
-        if (data.ok && data.resumen) {
-          setResumen(data.resumen)
-        } else if (data.ok && data.texto_completo) {
-          // Si hay texto completo pero no resumen, mostrar el texto completo
-          setResumen(data.texto_completo)
+        if (data.ok && data.fullText) {
+          // Mostrar el resumen (generado por IA sin inventar)
+          setResumen(data.resumen || data.fullText)
+          
+          // Guardar los datos del artículo en formato compatible con la ficha
+          // El texto_completo se usa para generar la ficha, el resumen para mostrar
+          setArticleData({
+            ok: true,
+            numero_articulo: data.articleNumber ? `Artículo ${data.articleNumber}` : art.numero,
+            rubrica_articulo: data.title || art.articulo_texto || '',
+            texto_completo: data.fullText, // Texto completo para generar la ficha
+            resumen: data.resumen || data.fullText, // Resumen para mostrar
+            paginas: art.pages || []
+          })
         } else {
-          throw new Error(data.error || 'No se pudo generar el resumen.')
+          throw new Error(data.error || 'No se pudo extraer el artículo.')
         }
-        
-        // Guardar los datos del artículo para generar la ficha
-        setArticleData(data)
       } catch (error: any) {
-        console.error('Error extrayendo resumen:', error)
-        setResumen(`Error: ${error.message || 'No se pudo generar el resumen.'}`)
+        console.error('Error extrayendo artículo con IA:', error)
+        setResumen(`Error: ${error.message || 'No se pudo extraer el artículo.'}`)
       } finally {
         setLoading(false)
       }
@@ -273,7 +271,7 @@ function ArticleDetail({ art, idx, pagesFull, pagesFullRaw, frontMatterDropped, 
     loadArticleSummary()
     // Limpiar la ficha cuando cambia el artículo
     setFiche(null)
-  }, [art.anchor])
+  }, [art.anchor, lawName, mentalOutline])
 
   const number = normalizeArticleNumber(art.numero, art.articulo_texto, idx)
   const heading = normalizeArticleHeading(art.articulo_texto, number)
@@ -299,7 +297,7 @@ function ArticleDetail({ art, idx, pagesFull, pagesFullRaw, frontMatterDropped, 
           </div>
         </div>
         {/* Botón para crear ficha */}
-        {mentalOutline && articleData && (
+        {mentalOutline && articleData && resumen && (
           <div className="mt-3 flex justify-end">
             <button
               type="button"
@@ -375,8 +373,161 @@ function ArticleDetail({ art, idx, pagesFull, pagesFullRaw, frontMatterDropped, 
           </div>
         ) : resumen ? (
           <div className="prose prose-sm max-w-none">
+            <div className="flex items-center justify-between mb-2">
+              <h4 className="text-sm font-semibold text-slate-700">Resumen del artículo</h4>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    // Descargar resumen en TXT
+                    const resumenFormateado = formatResumen(resumen)
+                    const blob = new Blob([resumenFormateado], { type: 'text/plain;charset=utf-8' })
+                    const url = URL.createObjectURL(blob)
+                    const a = document.createElement('a')
+                    a.href = url
+                    a.download = `Resumen_Articulo_${art.numero.replace(/\s+/g, '_')}.txt`
+                    document.body.appendChild(a)
+                    a.click()
+                    document.body.removeChild(a)
+                    URL.revokeObjectURL(url)
+                  }}
+                  className="px-3 py-1.5 rounded-lg bg-blue-600 text-white text-xs font-medium hover:bg-blue-700 flex items-center gap-1.5"
+                >
+                  <span>📄</span>
+                  <span>Descargar TXT</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    try {
+                      // Generar PDF del resumen
+                      const { PDFDocument, rgb, StandardFonts } = await import('pdf-lib')
+                      const pdfDoc = await PDFDocument.create()
+                      let currentPage = pdfDoc.addPage([595, 842]) // A4
+                      const font = await pdfDoc.embedFont(StandardFonts.Helvetica)
+                      const boldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold)
+                      
+                      // Título
+                      const title = `Artículo ${art.numero}`
+                      const rubrica = art.articulo_texto || ''
+                      const resumenFormateado = formatResumen(resumen)
+                      
+                      let y = 800
+                      const margin = 50
+                      const fontSize = 12
+                      const lineHeight = 16
+                      const maxWidth = 495
+                      
+                      // Función para obtener o crear nueva página
+                      const getPage = () => {
+                        if (y < 50) {
+                          currentPage = pdfDoc.addPage([595, 842])
+                          y = 800
+                        }
+                        return currentPage
+                      }
+                      
+                      // Título del artículo
+                      getPage().drawText(title, {
+                        x: margin,
+                        y: y,
+                        size: 16,
+                        font: boldFont,
+                        color: rgb(0, 0, 0),
+                      })
+                      y -= 25
+                      
+                      // Rúbrica si existe
+                      if (rubrica && rubrica !== title) {
+                        getPage().drawText(rubrica, {
+                          x: margin,
+                          y: y,
+                          size: fontSize,
+                          font: boldFont,
+                          color: rgb(0.2, 0.2, 0.2),
+                        })
+                        y -= 25
+                      }
+                      
+                      // Línea separadora
+                      y -= 10
+                      getPage().drawLine({
+                        start: { x: margin, y: y },
+                        end: { x: 545, y: y },
+                        thickness: 1,
+                        color: rgb(0.7, 0.7, 0.7),
+                      })
+                      y -= 20
+                      
+                      // Resumen (dividir en líneas)
+                      const lines = resumenFormateado.split('\n')
+                      for (const line of lines) {
+                        // Dividir líneas largas
+                        const words = line.split(' ')
+                        let currentLine = ''
+                        for (const word of words) {
+                          const testLine = currentLine ? `${currentLine} ${word}` : word
+                          const textWidth = font.widthOfTextAtSize(testLine, fontSize)
+                          
+                          if (textWidth > maxWidth && currentLine) {
+                            // Dibujar línea actual
+                            getPage().drawText(currentLine, {
+                              x: margin,
+                              y: y,
+                              size: fontSize,
+                              font: font,
+                              color: rgb(0, 0, 0),
+                            })
+                            y -= lineHeight
+                            currentLine = word
+                          } else {
+                            currentLine = testLine
+                          }
+                        }
+                        
+                        // Dibujar última línea del párrafo
+                        if (currentLine) {
+                          getPage().drawText(currentLine, {
+                            x: margin,
+                            y: y,
+                            size: fontSize,
+                            font: font,
+                            color: rgb(0, 0, 0),
+                          })
+                          y -= lineHeight
+                        }
+                        
+                        // Espacio extra después de párrafos vacíos
+                        if (!line.trim()) {
+                          y -= lineHeight * 0.5
+                        }
+                      }
+                      
+                      // Guardar PDF
+                      const pdfBytes = await pdfDoc.save()
+                      const blob = new Blob([pdfBytes], { type: 'application/pdf' })
+                      const url = URL.createObjectURL(blob)
+                      const a = document.createElement('a')
+                      a.href = url
+                      a.download = `Resumen_Articulo_${art.numero.replace(/\s+/g, '_')}.pdf`
+                      document.body.appendChild(a)
+                      a.click()
+                      document.body.removeChild(a)
+                      URL.revokeObjectURL(url)
+                    } catch (error: any) {
+                      console.error('Error generando PDF:', error)
+                      alert(`Error generando PDF: ${error.message || 'Error desconocido'}`)
+                    }
+                  }}
+                  className="px-3 py-1.5 rounded-lg bg-red-600 text-white text-xs font-medium hover:bg-red-700 flex items-center gap-1.5"
+                >
+                  <span>📕</span>
+                  <span>Descargar PDF</span>
+                </button>
+              </div>
+            </div>
             <div className="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap bg-slate-50 rounded-lg p-4 border border-slate-200 shadow-inner">
-              {resumen}
+              {formatResumen(resumen)}
             </div>
           </div>
         ) : (
@@ -390,32 +541,839 @@ function ArticleDetail({ art, idx, pagesFull, pagesFullRaw, frontMatterDropped, 
           <div className="mt-6 pt-6 border-t-2 border-slate-200">
             <div className="flex items-center justify-between mb-3">
               <h4 className="text-sm font-bold text-slate-700 uppercase tracking-wide">Ficha del artículo</h4>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    // Descargar el archivo TXT
+                    const blob = new Blob([fiche], { type: 'text/plain;charset=utf-8' })
+                    const url = URL.createObjectURL(blob)
+                    const a = document.createElement('a')
+                    a.href = url
+                    a.download = `Ficha_Articulo_${art.numero.replace(/\s+/g, '_')}.txt`
+                    document.body.appendChild(a)
+                    a.click()
+                    document.body.removeChild(a)
+                    URL.revokeObjectURL(url)
+                  }}
+                  className="px-3 py-1.5 rounded-lg bg-blue-600 text-white text-xs font-medium hover:bg-blue-700 flex items-center gap-1.5"
+                >
+                  <span>📄</span>
+                  <span>Descargar TXT</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    try {
+                      // Generar PDF de la ficha
+                      const { PDFDocument, rgb, StandardFonts } = await import('pdf-lib')
+                      const pdfDoc = await PDFDocument.create()
+                      let currentPage = pdfDoc.addPage([595, 842]) // A4
+                      const font = await pdfDoc.embedFont(StandardFonts.Helvetica)
+                      const boldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold)
+                      const monoFont = await pdfDoc.embedFont(StandardFonts.Courier)
+                      
+                      let y = 800
+                      const margin = 50
+                      const fontSize = 10
+                      const lineHeight = 14
+                      const maxWidth = 495
+                      
+                      // Función para obtener o crear nueva página
+                      const getPage = () => {
+                        if (y < 50) {
+                          currentPage = pdfDoc.addPage([595, 842])
+                          y = 800
+                        }
+                        return currentPage
+                      }
+                      
+                      // Función para limpiar caracteres incompatibles con WinAnsi
+                      const cleanTextForPDF = (text: string): string => {
+                        return text
+                          .replace(/═/g, '=')  // Reemplazar doble línea por igual
+                          .replace(/─/g, '-')  // Reemplazar línea simple por guion
+                          .replace(/📄|📑|📖|📋|📌/g, '') // Eliminar emojis
+                      }
+                      
+                      // Función para dibujar texto con ajuste de línea y justificación al ancho de la primera línea
+                      const drawTextWithWrap = (text: string, x: number, y: number, font: any, size: number, maxWidth: number, indent: number = 0, justifyParagraph: boolean = false): number => {
+                        const words = text.split(' ').filter(w => w.length > 0)
+                        const lines: string[] = []
+                        let currentLine = ''
+                        
+                        // Ancho de justificación: ancho de la primera línea (incluyendo indentación)
+                        const justifyWidth = maxWidth - indent
+                        
+                        // Dividir en líneas usando el ancho de justificación
+                        for (const word of words) {
+                          const testLine = currentLine ? `${currentLine} ${word}` : word
+                          const textWidth = font.widthOfTextAtSize(testLine, size)
+                          
+                          if (textWidth > justifyWidth && currentLine) {
+                            lines.push(currentLine)
+                            currentLine = word
+                          } else {
+                            currentLine = testLine
+                          }
+                        }
+                        if (currentLine) {
+                          lines.push(currentLine)
+                        }
+                        
+                        // Dibujar líneas con justificación al ancho de la primera línea
+                        let currentY = y
+                        const firstLineX = x + indent
+                        
+                        for (let i = 0; i < lines.length; i++) {
+                          const line = lines[i]
+                          const isFirstLine = i === 0
+                          const isLastLine = i === lines.length - 1
+                          const lineX = isFirstLine ? firstLineX : x
+                          
+                          if (justifyParagraph && !isLastLine && line.split(' ').length > 1) {
+                            // Justificar todas las líneas (excepto la última) al ancho de la primera línea
+                            const lineWidth = font.widthOfTextAtSize(line, size)
+                            const spaceWidth = font.widthOfTextAtSize(' ', size)
+                            const totalSpaces = line.split(' ').length - 1
+                            const extraSpace = (justifyWidth - lineWidth) / totalSpaces
+                            
+                            let currentX = lineX
+                            const lineWords = line.split(' ')
+                            for (let j = 0; j < lineWords.length; j++) {
+                              const word = lineWords[j]
+                              getPage().drawText(word, {
+                                x: currentX,
+                                y: currentY,
+                                size: size,
+                                font: font,
+                                color: rgb(0, 0, 0),
+                              })
+                              currentX += font.widthOfTextAtSize(word, size) + spaceWidth + extraSpace
+                            }
+                          } else {
+                            // Última línea o línea sin justificar
+                            getPage().drawText(line, {
+                              x: lineX,
+                              y: currentY,
+                              size: size,
+                              font: font,
+                              color: rgb(0, 0, 0),
+                            })
+                          }
+                          currentY -= lineHeight
+                        }
+                        
+                        return currentY
+                      }
+                      
+                      // Agrupar líneas en párrafos (similar a la visualización)
+                      const lines = fiche.split('\n')
+                      const paragraphs: Array<{ lines: string[]; isArticleTitle: boolean; isHeader: boolean; isSeparator: boolean }> = []
+                      let currentParagraph: string[] = []
+                      let foundTextoDelArticulo = false
+                      
+                      for (let i = 0; i < lines.length; i++) {
+                        const line = lines[i].trim()
+                        const prevLine = i > 0 ? lines[i - 1].trim() : ''
+                        
+                        // Detectar separadores
+                        const isSeparator = /^[═─]+$/.test(line)
+                        
+                        // Detectar "Texto del artículo:" para saber que viene el título
+                        if (/^Texto del artículo:/i.test(line)) {
+                          foundTextoDelArticulo = true
+                        }
+                        
+                        // Detectar solo el título del artículo (exactamente "Artículo X. Título")
+                        // Debe aparecer después de "Texto del artículo:" y ser la primera línea que empieza con "Artículo"
+                        const isArticleTitle = foundTextoDelArticulo && 
+                                             /^Artículo\s+\d+\.\s+[A-ZÁÉÍÓÚÑ]/.test(line) && 
+                                             line.length < 150 && // Títulos son relativamente cortos
+                                             !line.includes('del Reglamento') && // Excluir referencias dentro del texto
+                                             !line.includes('del artículo') && // Excluir referencias
+                                             !line.match(/\d+\.\s*\d+/) // Excluir líneas con números de apartado
+                        
+                        // Detectar otros encabezados (pero no en negrita)
+                        const isHeader = /^(FICHA|Documento|Estructura|Rúbrica|Texto del artículo)/i.test(line) ||
+                                       /^📄|📑|📖|📋|📌/.test(line)
+                        
+                        // Si la línea está vacía, finalizar párrafo actual
+                        if (!line) {
+                          if (currentParagraph.length > 0) {
+                            paragraphs.push({ lines: currentParagraph, isArticleTitle: false, isHeader: false, isSeparator: false })
+                            currentParagraph = []
+                          }
+                          continue
+                        }
+                        
+                        // Si es separador, finalizar párrafo y añadir separador
+                        if (isSeparator) {
+                          if (currentParagraph.length > 0) {
+                            paragraphs.push({ lines: currentParagraph, isArticleTitle: false, isHeader: false, isSeparator: false })
+                            currentParagraph = []
+                          }
+                          paragraphs.push({ lines: [], isArticleTitle: false, isHeader: false, isSeparator: true })
+                          continue
+                        }
+                        
+                        // Si es título del artículo o encabezado, finalizar párrafo y añadir como párrafo separado
+                        if (isArticleTitle || isHeader) {
+                          if (currentParagraph.length > 0) {
+                            paragraphs.push({ lines: currentParagraph, isArticleTitle: false, isHeader: false, isSeparator: false })
+                            currentParagraph = []
+                          }
+                          paragraphs.push({ lines: [line], isArticleTitle: isArticleTitle, isHeader: isHeader, isSeparator: false })
+                          // Resetear la bandera después de encontrar el título
+                          if (isArticleTitle) {
+                            foundTextoDelArticulo = false
+                          }
+                          continue
+                        }
+                        
+                        // Detectar si es inicio de nuevo párrafo
+                        const isNewParagraph = !prevLine || 
+                                             /^[a-z]\)\s/i.test(line) || 
+                                             /^\d+\.\s/.test(line)
+                        
+                        if (isNewParagraph && currentParagraph.length > 0) {
+                          paragraphs.push({ lines: currentParagraph, isArticleTitle: false, isHeader: false, isSeparator: false })
+                          currentParagraph = []
+                        }
+                        currentParagraph.push(line)
+                      }
+                      
+                      // Añadir último párrafo si queda
+                      if (currentParagraph.length > 0) {
+                        paragraphs.push({ lines: currentParagraph, isArticleTitle: false, isHeader: false, isSeparator: false })
+                      }
+                      
+                      // Dibujar párrafos
+                      for (const para of paragraphs) {
+                        if (para.isSeparator) {
+                          // Dibujar línea separadora
+                          getPage().drawLine({
+                            start: { x: margin, y: y },
+                            end: { x: 545, y: y },
+                            thickness: 1,
+                            color: rgb(0.7, 0.7, 0.7),
+                          })
+                          y -= lineHeight * 1.5
+                          continue
+                        }
+                        
+                        if (para.lines.length === 0) continue
+                        
+                        const paraText = para.lines.join(' ')
+                        const cleanedText = cleanTextForPDF(paraText)
+                        
+                        // Aplicar formato según tipo
+                        if (para.isArticleTitle) {
+                          // Solo el título del artículo en negrita
+                          y = drawTextWithWrap(cleanedText, margin, y, boldFont, 12, maxWidth, 0, false)
+                          y -= lineHeight * 0.5
+                        } else if (para.isHeader) {
+                          // Otros encabezados sin negrita
+                          y = drawTextWithWrap(cleanedText, margin, y, monoFont, 12, maxWidth, 0, false)
+                          y -= lineHeight * 0.5
+                        } else {
+                          // Aplicar indentación y justificación al ancho de la primera línea para todo el párrafo
+                          const indent = 30 // Indentación en puntos (similar a pl-8 en CSS)
+                          y = drawTextWithWrap(cleanedText, margin, y, monoFont, fontSize, maxWidth, indent, true)
+                          y -= lineHeight * 0.3
+                        }
+                      }
+                      
+                      // Guardar PDF
+                      const pdfBytes = await pdfDoc.save()
+                      const blob = new Blob([pdfBytes], { type: 'application/pdf' })
+                      const url = URL.createObjectURL(blob)
+                      const a = document.createElement('a')
+                      a.href = url
+                      a.download = `Ficha_Articulo_${art.numero.replace(/\s+/g, '_')}.pdf`
+                      document.body.appendChild(a)
+                      a.click()
+                      document.body.removeChild(a)
+                      URL.revokeObjectURL(url)
+                    } catch (error: any) {
+                      console.error('Error generando PDF:', error)
+                      alert(`Error generando PDF: ${error.message || 'Error desconocido'}`)
+                    }
+                  }}
+                  className="px-3 py-1.5 rounded-lg bg-red-600 text-white text-xs font-medium hover:bg-red-700 flex items-center gap-1.5"
+                >
+                  <span>📕</span>
+                  <span>Descargar PDF</span>
+                </button>
+              </div>
+            </div>
+            <div className="text-xs text-slate-700 leading-relaxed bg-white rounded-lg p-4 border-2 border-slate-300 shadow-sm font-mono max-h-[400px] overflow-y-auto">
+              {fiche ? (
+                <div className="font-mono text-xs max-w-3xl">
+                  {fiche.split('\n').map((line, idx, lines) => {
+                    const trimmedLine = line.trim()
+                    const prevLine = idx > 0 ? lines[idx - 1].trim() : ''
+                    
+                    // Detectar si es un encabezado o separador
+                    const isHeader = /^[═─]+$/.test(trimmedLine) || 
+                                   /^(FICHA|Documento|Estructura|Artículo|Rúbrica|Texto del artículo)/i.test(trimmedLine) ||
+                                   /^📄|📑|📖|📋|📌/.test(trimmedLine)
+                    
+                    // Si la línea está vacía, mantener el salto de línea
+                    if (!trimmedLine) {
+                      return <br key={idx} />
+                    }
+                    
+                    // Detectar si es la primera línea de un párrafo
+                    // (línea anterior vacía, o es la primera línea, o empieza con apartado/letra)
+                    const isFirstLineOfParagraph = !prevLine || 
+                                                  /^[a-z]\)\s/i.test(trimmedLine) || 
+                                                  /^\d+\.\s/.test(trimmedLine) ||
+                                                  (idx > 0 && !lines[idx - 1].trim())
+                    
+                    if (isHeader) {
+                      return (
+                        <div key={idx}>
+                          {trimmedLine}
+                        </div>
+                      )
+                    }
+                    
+                    // Aplicar indentación a la primera línea de cada párrafo
+                    return (
+                      <div key={idx} className={isFirstLineOfParagraph ? 'pl-8' : ''}>
+                        {trimmedLine}
+                      </div>
+                    )
+                  })}
+                </div>
+              ) : (
+                '(Ficha vacía)'
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+
+
+// Componente para mostrar el detalle de la disposición seleccionada
+function DispositionDetail({
+  disposicion,
+  tipo,
+  idx,
+  pagesFull,
+  pagesFullRaw,
+  frontMatterDropped,
+  pagesCount,
+  sourceFromBookmarks,
+  mentalOutline,
+  lawName,
+}: {
+  disposicion: DisposicionItem
+  tipo: 'adicionales' | 'transitorias' | 'derogatorias' | 'finales'
+  idx: number
+  pagesFull: { num: number; text: string }[]
+  pagesFullRaw?: { num: number; text: string }[]
+  frontMatterDropped?: number[]
+  pagesCount?: number | null
+  sourceFromBookmarks?: boolean
+  mentalOutline?: MentalOutline | null
+  lawName?: string
+}) {
+  const [resumen, setResumen] = useState<string | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [fullText, setFullText] = useState<string | null>(null)
+  const [fiche, setFiche] = useState<string | null>(null)
+  const [loadingFiche, setLoadingFiche] = useState(false)
+
+  useEffect(() => {
+    setResumen(null)
+    setFullText(null)
+    setFiche(null)
+    setLoading(false)
+    setLoadingFiche(false)
+
+    const loadDispositionSummary = async () => {
+      setLoading(true)
+      try {
+        const numeroDisposicion = disposicion.numero?.replace(/\?/g, '').trim() || ''
+        const lawNameToUse =
+          lawName || mentalOutline?.metadata?.document_title || mentalOutline?.metadata?.source || 'Ley'
+
+        const tipoDisposicion =
+          tipo === 'adicionales'
+            ? 'Adicional'
+            : tipo === 'transitorias'
+            ? 'Transitoria'
+            : tipo === 'derogatorias'
+            ? 'Derogatoria'
+            : 'Final'
+
+        const response = await fetch('/api/mental-outline/extract-disposition-ai', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            lawName: lawNameToUse,
+            dispositionType: tipoDisposicion,
+            dispositionNumber: numeroDisposicion,
+            pagesFull,
+            pagesFullRaw: pagesFullRaw && pagesFullRaw.length > 0 ? pagesFullRaw : null,
+            disposicionPagina: disposicion.pagina_disposicion || 0,
+            sourceFromBookmarks: sourceFromBookmarks || false,
+          }),
+        })
+
+        const data = await response.json()
+        if (!response.ok) {
+          throw new Error(data.error || `Error ${response.status}: ${response.statusText}`)
+        }
+
+        if (data.ok && data.fullText) {
+          setResumen(data.resumen || data.fullText)
+          setFullText(data.fullText)
+        } else {
+          throw new Error(data.error || 'No se pudo extraer la disposición.')
+        }
+      } catch (error: any) {
+        console.error('Error extrayendo disposición con IA:', error)
+        setResumen(`Error: ${error.message || 'No se pudo extraer la disposición.'}`)
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    loadDispositionSummary()
+  }, [disposicion.anchor, tipo, lawName, mentalOutline, pagesFull, pagesFullRaw, sourceFromBookmarks])
+
+  const number = normalizeDispositionNumber(disposicion, idx)
+  const tipoLabel =
+    tipo === 'adicionales'
+      ? 'Adicional'
+      : tipo === 'transitorias'
+      ? 'Transitoria'
+      : tipo === 'derogatorias'
+      ? 'Derogatoria'
+      : 'Final'
+ 
+	// NUEVO: título a partir solo de numero
+	const displayTitle =
+  (disposicion.numero && disposicion.numero.trim()) ||
+  `Disposición ${tipoLabel} ${number || '(sin número)'}`
+
+  return (
+    <div className="rounded-xl border-2 border-slate-200 bg-gradient-to-br from-white to-slate-50/30 p-5 shadow-lg">
+      <div className="mb-5 pb-4 border-b-2 border-slate-200">
+        <div className="flex items-start gap-3">
+          <div className="flex-shrink-0 w-12 h-12 rounded-lg bg-slate-100 flex items-center justify-center">
+            <span className="text-slate-800 font-bold text-lg">{number || '—'}</span>
+          </div>
+          <div className="flex-1 min-w-0">
+            <h3 className="text-xl font-bold text-slate-900 mb-1">
+              {displayTitle}
+            </h3>
+            {formatPages(disposicion.pages) && (
+              <div className="mt-2 inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-full bg-slate-100 text-slate-600">
+                <span>📄</span>
+                <span>{formatPages(disposicion.pages)}</span>
+              </div>
+            )}
+          </div>
+        </div>
+        {/* Botón para crear ficha */}
+        {mentalOutline && resumen && fullText && !fiche && (
+          <div className="mt-3 flex justify-end">
+            <button
+              type="button"
+              onClick={async () => {
+                if (!fullText) {
+                  alert('El texto completo de la disposición no está disponible. Por favor, espera a que se cargue el resumen.')
+                  return
+                }
+                
+                setLoadingFiche(true)
+                try {
+                  const numeroDisposicion = disposicion.numero?.replace(/\?/g, '').trim() || ''
+                  const lawNameToUse =
+                    lawName || mentalOutline?.metadata?.document_title || mentalOutline?.metadata?.source || 'Ley'
+
+                  const tipoDisposicion =
+                    tipo === 'adicionales'
+                      ? 'Adicional'
+                      : tipo === 'transitorias'
+                      ? 'Transitoria'
+                      : tipo === 'derogatorias'
+                      ? 'Derogatoria'
+                      : 'Final'
+
+                  const response = await fetch('/api/mental-outline/generate-fiche-disposition', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                      dispositionAnchor: disposicion.anchor,
+                      lawName: lawNameToUse,
+                      mentalOutline: mentalOutline,
+                      dispositionData: {
+                        tipo: tipoDisposicion,
+                        numero: numeroDisposicion,
+                        texto_encabezado: disposicion.texto_encabezado,
+                        fullText: fullText,
+                      },
+                    }),
+                  })
+
+                  const data = await response.json()
+                  if (!response.ok) {
+                    throw new Error(data.error || `Error ${response.status}: ${response.statusText}`)
+                  }
+
+                  if (data.ok && data.fiche) {
+                    setFiche(data.fiche)
+                  } else {
+                    throw new Error(data.error || 'No se pudo generar la ficha.')
+                  }
+                } catch (error: any) {
+                  console.error('Error generando ficha:', error)
+                  alert(`Error generando ficha: ${error.message || 'No se pudo generar la ficha.'}`)
+                } finally {
+                  setLoadingFiche(false)
+                }
+              }}
+              disabled={loadingFiche}
+              className="px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+            >
+              {loadingFiche ? (
+                <>
+                  <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent"></div>
+                  <span>Generando...</span>
+                </>
+              ) : (
+                <>
+                  <span>📄</span>
+                  <span>Crear ficha</span>
+                </>
+              )}
+            </button>
+          </div>
+        )}
+      </div>
+
+      <div className="mt-4">
+        {loading ? (
+          <div className="flex items-center gap-3 text-sm text-slate-600">
+            <div className="animate-spin rounded-full h-5 w-5 border-2 border-indigo-600 border-t-transparent"></div>
+            <span className="italic">Generando resumen...</span>
+          </div>
+        ) : resumen ? (
+          <div className="prose prose-sm max-w-none">
+            <div className="flex items-center justify-between mb-2">
+              <h4 className="text-sm font-semibold text-slate-700">Resumen de la disposición</h4>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const resumenFormateado = formatResumen(resumen)
+                    const blob = new Blob([resumenFormateado], { type: 'text/plain;charset=utf-8' })
+                    const url = URL.createObjectURL(blob)
+                    const a = document.createElement('a')
+                    a.href = url
+                    a.download = `Resumen_Disposicion_${tipoLabel}_${number || 'sin_numero'}.txt`
+                    document.body.appendChild(a)
+                    a.click()
+                    document.body.removeChild(a)
+                    URL.revokeObjectURL(url)
+                  }}
+                  className="px-3 py-1.5 rounded-lg bg-blue-600 text-white text-xs font-medium hover:bg-blue-700 flex items-center gap-1.5"
+                >
+                  <span>📄</span>
+                  <span>Descargar TXT</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    try {
+                      const { PDFDocument, rgb, StandardFonts } = await import('pdf-lib')
+                      const pdfDoc = await PDFDocument.create()
+                      let currentPage = pdfDoc.addPage([595, 842])
+                      const font = await pdfDoc.embedFont(StandardFonts.Helvetica)
+                      const boldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold)
+                      
+                      // Título
+                      const title = `Disposición ${tipoLabel} ${number || '(sin número)'}`
+                      const rubrica = heading && heading !== `Disposición ${tipoLabel} ${number}` ? heading.replace(/^Disposici[óo]n\s+(Adicional|Transitoria|Derogatoria|Final)\s*[\wáéíóúüñºª]*\.?\s*/i, '') : ''
+                      const resumenFormateado = formatResumen(resumen)
+                      
+                      let y = 800
+                      const margin = 50
+                      const fontSize = 12
+                      const lineHeight = 16
+                      const maxWidth = 495
+                      
+                      // Función para obtener o crear nueva página
+                      const getPage = () => {
+                        if (y < 50) {
+                          currentPage = pdfDoc.addPage([595, 842])
+                          y = 800
+                        }
+                        return currentPage
+                      }
+                      
+                      // Título de la disposición
+                      getPage().drawText(title, {
+                        x: margin,
+                        y: y,
+                        size: 16,
+                        font: boldFont,
+                        color: rgb(0, 0, 0),
+                      })
+                      y -= 25
+                      
+                      // Rúbrica si existe
+                      if (rubrica && rubrica !== title) {
+                        getPage().drawText(rubrica, {
+                          x: margin,
+                          y: y,
+                          size: fontSize,
+                          font: boldFont,
+                          color: rgb(0.2, 0.2, 0.2),
+                        })
+                        y -= 25
+                      }
+                      
+                      // Línea separadora
+                      y -= 10
+                      getPage().drawLine({
+                        start: { x: margin, y: y },
+                        end: { x: 545, y: y },
+                        thickness: 1,
+                        color: rgb(0.7, 0.7, 0.7),
+                      })
+                      y -= 20
+                      
+                      // Resumen (dividir en líneas)
+                      const lines = resumenFormateado.split('\n')
+                      for (const line of lines) {
+                        // Dividir líneas largas
+                        const words = line.split(' ')
+                        let currentLine = ''
+                        for (const word of words) {
+                          const testLine = currentLine ? `${currentLine} ${word}` : word
+                          const textWidth = font.widthOfTextAtSize(testLine, fontSize)
+                          
+                          if (textWidth > maxWidth && currentLine) {
+                            // Dibujar línea actual
+                            getPage().drawText(currentLine, {
+                              x: margin,
+                              y: y,
+                              size: fontSize,
+                              font: font,
+                              color: rgb(0, 0, 0),
+                            })
+                            y -= lineHeight
+                            currentLine = word
+                          } else {
+                            currentLine = testLine
+                          }
+                        }
+                        
+                        // Dibujar última línea del párrafo
+                        if (currentLine) {
+                          getPage().drawText(currentLine, {
+                            x: margin,
+                            y: y,
+                            size: fontSize,
+                            font: font,
+                            color: rgb(0, 0, 0),
+                          })
+                          y -= lineHeight
+                        }
+                        
+                        // Espacio extra después de párrafos vacíos
+                        if (!line.trim()) {
+                          y -= lineHeight * 0.5
+                        }
+                      }
+                      
+                      // Guardar PDF
+                      const pdfBytes = await pdfDoc.save()
+                      const blob = new Blob([pdfBytes as BlobPart], { type: 'application/pdf' })
+                      const url = URL.createObjectURL(blob)
+                      const a = document.createElement('a')
+                      a.href = url
+                      a.download = `Resumen_Disposicion_${tipoLabel}_${number || 'sin_numero'}.pdf`
+                      document.body.appendChild(a)
+                      a.click()
+                      document.body.removeChild(a)
+                      URL.revokeObjectURL(url)
+                    } catch (error: any) {
+                      console.error('Error generando PDF:', error)
+                      alert(`Error generando PDF: ${error.message || 'Error desconocido'}`)
+                    }
+                  }}
+                  className="px-3 py-1.5 rounded-lg bg-red-600 text-white text-xs font-medium hover:bg-red-700 flex items-center gap-1.5"
+                >
+                  <span>📕</span>
+                  <span>Descargar PDF</span>
+                </button>
+              </div>
+            </div>
+            <div className="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap bg-slate-50 rounded-lg p-4 border border-slate-200 shadow-inner">
+              {formatResumen(resumen)}
+            </div>
+          </div>
+        ) : (
+          <div className="text-sm text-slate-500 italic p-4 bg-slate-50 rounded-lg border border-slate-200">
+            No hay resumen disponible.
+          </div>
+        )}
+      </div>
+
+      {/* Previsualización de la ficha */}
+      {fiche && (
+        <div className="mt-6 pt-6 border-t-2 border-slate-200">
+          <div className="flex items-center justify-between mb-3">
+            <h4 className="text-sm font-bold text-slate-700 uppercase tracking-wide">Ficha de la disposición</h4>
+            <div className="flex gap-2">
               <button
                 type="button"
                 onClick={() => {
-                  // Descargar el archivo
                   const blob = new Blob([fiche], { type: 'text/plain;charset=utf-8' })
                   const url = URL.createObjectURL(blob)
                   const a = document.createElement('a')
                   a.href = url
-                  a.download = `Ficha_Articulo_${art.numero.replace(/\s+/g, '_')}.txt`
+                  a.download = `Ficha_Disposicion_${tipoLabel}_${number || 'sin_numero'}.txt`
                   document.body.appendChild(a)
                   a.click()
                   document.body.removeChild(a)
                   URL.revokeObjectURL(url)
                 }}
-                className="px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-xs font-medium hover:bg-emerald-700 flex items-center gap-1.5"
+                className="px-3 py-1.5 rounded-lg bg-blue-600 text-white text-xs font-medium hover:bg-blue-700 flex items-center gap-1.5"
               >
-                <span>💾</span>
-                <span>Descargar ficha</span>
+                <span>📄</span>
+                <span>Descargar TXT</span>
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  try {
+                    const { PDFDocument, rgb, StandardFonts } = await import('pdf-lib')
+                    const pdfDoc = await PDFDocument.create()
+                    let currentPage = pdfDoc.addPage([595, 842])
+                    const font = await pdfDoc.embedFont(StandardFonts.Helvetica)
+                    const boldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold)
+                    const monoFont = await pdfDoc.embedFont(StandardFonts.Courier)
+                    
+                    let y = 800
+                    const margin = 50
+                    const fontSize = 10
+                    const lineHeight = 14
+                    const maxWidth = 495
+                    
+                    const getPage = () => {
+                      if (y < 50) {
+                        currentPage = pdfDoc.addPage([595, 842])
+                        y = 800
+                      }
+                      return currentPage
+                    }
+                    
+                    const cleanTextForPDF = (text: string): string => {
+                      return text
+                        .replace(/═/g, '=')
+                        .replace(/─/g, '-')
+                        .replace(/📄|📑|📖|📋|📌/g, '')
+                    }
+                    
+                    const drawTextWithWrap = (text: string, x: number, y: number, font: any, size: number, maxWidth: number, indent: number = 0): number => {
+                      const words = text.split(' ').filter(w => w.length > 0)
+                      const lines: string[] = []
+                      let currentLine = ''
+                      const justifyWidth = maxWidth - indent
+                      
+                      for (const word of words) {
+                        const testLine = currentLine ? `${currentLine} ${word}` : word
+                        const textWidth = font.widthOfTextAtSize(testLine, size)
+                        
+                        if (textWidth > justifyWidth && currentLine) {
+                          lines.push(currentLine)
+                          currentLine = word
+                        } else {
+                          currentLine = testLine
+                        }
+                      }
+                      if (currentLine) {
+                        lines.push(currentLine)
+                      }
+                      
+                      let currentY = y
+                      const firstLineX = x + indent
+                      
+                      for (let i = 0; i < lines.length; i++) {
+                        const line = lines[i]
+                        const isFirstLine = i === 0
+                        const lineX = isFirstLine ? firstLineX : x
+                        
+                        getPage().drawText(cleanTextForPDF(line), {
+                          x: lineX,
+                          y: currentY,
+                          size: size,
+                          font: font,
+                          color: rgb(0, 0, 0),
+                        })
+                        currentY -= lineHeight
+                      }
+                      
+                      return currentY
+                    }
+                    
+                    const ficheLines = fiche.split('\n')
+                    for (const line of ficheLines) {
+                      const cleanedLine = cleanTextForPDF(line.trim())
+                      if (!cleanedLine) {
+                        y -= lineHeight * 0.5
+                        continue
+                      }
+                      
+                      if (/^[═─]+$/.test(line.trim()) || /^(FICHA|Documento|Estructura|Disposición|Rúbrica)/i.test(cleanedLine)) {
+                        y = drawTextWithWrap(cleanedLine, margin, y, boldFont, fontSize + 2, maxWidth)
+                        y -= lineHeight
+                      } else {
+                        const isIndented = /^\s{4,}/.test(line) || /^[a-z]\)\s/i.test(cleanedLine) || /^\d+\.\s/.test(cleanedLine)
+                        const indent = isIndented ? 20 : 0
+                        y = drawTextWithWrap(cleanedLine, margin, y, monoFont, fontSize, maxWidth, indent)
+                      }
+                    }
+                    
+                    const pdfBytes = await pdfDoc.save()
+                    const blob = new Blob([pdfBytes as BlobPart], { type: 'application/pdf' })
+                    const url = URL.createObjectURL(blob)
+                    const a = document.createElement('a')
+                    a.href = url
+                    a.download = `Ficha_Disposicion_${tipoLabel}_${number || 'sin_numero'}.pdf`
+                    document.body.appendChild(a)
+                    a.click()
+                    document.body.removeChild(a)
+                    URL.revokeObjectURL(url)
+                  } catch (error: any) {
+                    console.error('Error generando PDF:', error)
+                    alert(`Error generando PDF: ${error.message || 'Error desconocido'}`)
+                  }
+                }}
+                className="px-3 py-1.5 rounded-lg bg-red-600 text-white text-xs font-medium hover:bg-red-700 flex items-center gap-1.5"
+              >
+                <span>📕</span>
+                <span>Descargar PDF</span>
               </button>
             </div>
-            <div className="text-xs text-slate-700 leading-relaxed whitespace-pre-wrap bg-white rounded-lg p-4 border-2 border-slate-300 shadow-sm font-mono max-h-[400px] overflow-y-auto">
-              {fiche || '(Ficha vacía)'}
-            </div>
           </div>
-        )}
-      </div>
+          <div className="text-xs text-slate-700 leading-relaxed bg-white rounded-lg p-4 border-2 border-slate-300 shadow-sm font-mono max-h-[400px] overflow-y-auto whitespace-pre-wrap">
+            {fiche}
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -635,19 +1593,81 @@ function OutlineTree({ outline, pagesFull, pagesFullRaw, frontMatterDropped, pag
 
   const renderDisposGroup = (label: string, prefix: string, items: DisposicionItem[]) => {
     if (!items?.length) return null
+    
+    // Obtener el color según el tipo de disposición
+    const getColorClass = (prefix: string) => {
+      switch (prefix.toLowerCase()) {
+        case 'adicional':
+          return {
+            bg: 'bg-purple-100',
+            text: 'text-purple-700',
+            border: 'border-purple-200',
+            hover: 'hover:border-purple-300',
+            badge: 'bg-purple-50',
+            badgeText: 'text-purple-700',
+            borderLeft: 'border-purple-200'
+          }
+        case 'transitoria':
+          return {
+            bg: 'bg-blue-100',
+            text: 'text-blue-700',
+            border: 'border-blue-200',
+            hover: 'hover:border-blue-300',
+            badge: 'bg-blue-50',
+            badgeText: 'text-blue-700',
+            borderLeft: 'border-blue-200'
+          }
+        case 'derogatoria':
+          return {
+            bg: 'bg-red-100',
+            text: 'text-red-700',
+            border: 'border-red-200',
+            hover: 'hover:border-red-300',
+            badge: 'bg-red-50',
+            badgeText: 'text-red-700',
+            borderLeft: 'border-red-200'
+          }
+        case 'final':
+          return {
+            bg: 'bg-green-100',
+            text: 'text-green-700',
+            border: 'border-green-200',
+            hover: 'hover:border-green-300',
+            badge: 'bg-green-50',
+            badgeText: 'text-green-700',
+            borderLeft: 'border-green-200'
+          }
+        default:
+          return {
+            bg: 'bg-indigo-100',
+            text: 'text-indigo-700',
+            border: 'border-indigo-200',
+            hover: 'hover:border-indigo-300',
+            badge: 'bg-indigo-50',
+            badgeText: 'text-indigo-700',
+            borderLeft: 'border-indigo-200'
+          }
+      }
+    }
+    
+    const colors = getColorClass(prefix)
+    
     return (
-      <details key={label} open className="rounded-xl border border-slate-200 bg-white p-3 text-sm shadow-sm">
-        <summary className="flex cursor-pointer items-center gap-2 text-slate-700">
-          <span className="font-semibold">{label}</span>
-          <span className="rounded bg-slate-100 px-2 py-0.5 text-xs text-slate-600">{items.length}</span>
+      <details key={label} open className={`rounded-2xl border-2 ${colors.border} bg-gradient-to-br from-white to-slate-50/50 p-4 text-sm shadow-md transition-all hover:shadow-lg ${colors.hover} group/details`}>
+        <summary className="flex cursor-pointer flex-wrap items-center gap-2 text-slate-800 hover:text-slate-900 group [&::-webkit-details-marker]:hidden list-none">
+          <span className={`${colors.text} group-hover:opacity-80 transition-transform duration-200 text-lg group-open/details:rotate-90 inline-block`}>▶</span>
+          <span className={`rounded-lg ${colors.bg} px-3 py-1 text-xs font-bold uppercase tracking-wide ${colors.text} shadow-sm`}>
+            {label}
+          </span>
+          <span className={`rounded ${colors.badge} px-2 py-0.5 text-xs ${colors.badgeText} font-medium`}>{items.length}</span>
         </summary>
-        <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+        <div className={`mt-4 space-y-3 border-l-3 ${colors.borderLeft} pl-5 ml-1`}>
           {items.map((item, idx) => {
             const number = normalizeDispositionNumber(item, idx)
             const heading = normalizeDispositionHeading(prefix, item, number)
             const showBody = heading && heading !== `Disposición ${prefix} ${number}`
             return (
-              <div key={item.anchor || `${prefix}-${idx}`} className="rounded-lg border border-slate-200 bg-slate-50 p-2 text-xs shadow-sm">
+              <div key={item.anchor || `${prefix}-${idx}`} className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs shadow-sm hover:shadow-md transition-shadow">
                 <div className="font-semibold text-slate-700">
                   Disposición {prefix} {number}
                 </div>
@@ -704,8 +1724,33 @@ function OutlineTree({ outline, pagesFull, pagesFullRaw, frontMatterDropped, pag
     { label: 'Exposición de motivos', entry: outline.front_matter?.exposicion_motivos },
   ].filter((item) => item.entry?.present)
 
-  const disposSections = (Object.entries(outline.disposiciones || {}) as [keyof typeof DISPOSITION_PREFIX, DisposicionItem[]][]) 
-    .map(([key, list]) => renderDisposGroup(`Disposiciones ${key.charAt(0).toUpperCase()}${key.slice(1)}`, DISPOSITION_PREFIX[key], list))
+  // Log para debugging: verificar disposiciones antes de renderizar
+  if (outline.disposiciones) {
+    const totalDispos = Object.values(outline.disposiciones).reduce((acc, arr) => acc + (arr?.length || 0), 0)
+    if (totalDispos > 0) {
+      console.log('Disposiciones encontradas para renderizar:', {
+        total: totalDispos,
+        porTipo: Object.entries(outline.disposiciones).map(([key, arr]) => [key, arr?.length || 0]),
+        disposiciones: outline.disposiciones,
+      })
+    }
+  }
+  
+  // Asegurar que todas las claves de DISPOSITION_PREFIX estén presentes, incluso si están vacías
+  const disposicionesNormalizadas = {
+    adicionales: outline.disposiciones?.adicionales || [],
+    transitorias: outline.disposiciones?.transitorias || [],
+    derogatorias: outline.disposiciones?.derogatorias || [],
+    finales: outline.disposiciones?.finales || [],
+  }
+  
+  const disposSections = (Object.entries(disposicionesNormalizadas) as [keyof typeof DISPOSITION_PREFIX, DisposicionItem[]][]) 
+    .map(([key, list]) => {
+      if (list && list.length > 0) {
+        console.log(`Renderizando disposiciones ${key}:`, list.length, 'items')
+      }
+      return renderDisposGroup(`Disposiciones ${key.charAt(0).toUpperCase()}${key.slice(1)}`, DISPOSITION_PREFIX[key], list)
+    })
     .filter(Boolean)
 
   return (
@@ -731,11 +1776,8 @@ function OutlineTree({ outline, pagesFull, pagesFullRaw, frontMatterDropped, pag
 
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
         {tituloCards}
+        {disposSections}
       </div>
-
-      {disposSections.length > 0 && (
-        <div className="space-y-3">{disposSections}</div>
-      )}
     </div>
   )
 }
@@ -835,6 +1877,11 @@ export default function GeneratePage() {
     art: NonNullable<MentalOutline['titulos'][number]['articulos']>[number]
     idx: number
   } | null>(null)
+  const [selectedDisposition, setSelectedDisposition] = useState<{
+    disposicion: DisposicionItem
+    tipo: 'adicionales' | 'transitorias' | 'derogatorias' | 'finales'
+    idx: number
+  } | null>(null)
   const [bookmarks, setBookmarks] = useState<any[]>([]) // Bookmarks del PDF
   const [mentalOutlineSource, setMentalOutlineSource] = useState<'bookmarks' | 'direct' | null>(null) // Origen del esquema mental
   const [isOutlineOnlyView, setIsOutlineOnlyView] = useState(false) // Modo "solo esquema" (vista en nueva pestaña)
@@ -889,6 +1936,7 @@ export default function GeneratePage() {
     if (mentalOutline) {
       setOutlineViewMode('tree')
       setSelectedArticle(null) // Limpiar el artículo seleccionado cuando cambia el esquema mental
+      setSelectedDisposition(null) // Limpiar la disposición seleccionada cuando cambia el esquema mental
       // Guardar en localStorage para que esté disponible en nueva pestaña
       try {
         localStorage.setItem('tfm.mentalOutline', JSON.stringify(mentalOutline))
@@ -1074,6 +2122,7 @@ export default function GeneratePage() {
       setMentalOutline(null)
       setMentalOutlineError(null)
       setSelectedArticle(null) // Limpiar el artículo seleccionado al cargar un nuevo PDF
+      setSelectedDisposition(null) // Limpiar la disposición seleccionada al cargar un nuevo PDF
       if (!userEditedLawName) {
         const auto = deriveLawName(data?.meta?.info, pdfFile)
         if (auto) setLawName(auto)
@@ -1326,6 +2375,14 @@ export default function GeneratePage() {
       if (!res.ok || !data?.ok) {
         throw new Error(data?.error || 'Error generando esquema desde bookmarks')
       }
+      
+      // Log para debugging: verificar que las disposiciones estén presentes
+      console.log('Esquema recibido desde bookmarks:', {
+        hasDisposiciones: !!data.schema?.disposiciones,
+        disposiciones: data.schema?.disposiciones,
+        stats: data.stats,
+      })
+      
       setMentalOutline(data.schema as MentalOutline)
       setMentalOutlineSource('bookmarks') // Marcar como generado desde bookmarks
       
@@ -1756,13 +2813,21 @@ export default function GeneratePage() {
               <div className="max-h-[calc(100vh-120px)] overflow-y-auto pr-2 scrollbar-thin scrollbar-thumb-slate-300 scrollbar-track-slate-100">
                 <LegalOutlineTree 
                   outline={mentalOutline} 
-                  onArticleSelect={(art, idx) => setSelectedArticle({ art, idx })}
+                  onArticleSelect={(art, idx) => {
+                    setSelectedArticle({ art, idx })
+                    setSelectedDisposition(null) // Limpiar disposición al seleccionar artículo
+                  }}
+                  onDispositionSelect={(disposicion, tipo, idx) => {
+                    setSelectedDisposition({ disposicion, tipo, idx })
+                    setSelectedArticle(null) // Limpiar artículo al seleccionar disposición
+                  }}
                   selectedArticleAnchor={selectedArticle?.art.anchor || null}
+                  selectedDispositionAnchor={selectedDisposition?.disposicion.anchor || null}
                 />
               </div>
             </div>
             
-            {/* Columna derecha: Detalle del artículo */}
+            {/* Columna derecha: Detalle del artículo o disposición */}
             <div className="flex-1 min-w-0">
               <div className="max-h-[calc(100vh-120px)] overflow-y-auto scrollbar-thin scrollbar-thumb-slate-300 scrollbar-track-slate-100">
                 {selectedArticle ? (
@@ -1777,12 +2842,25 @@ export default function GeneratePage() {
                     mentalOutline={mentalOutline}
                     lawName={lawName}
                   />
+                ) : selectedDisposition ? (
+                  <DispositionDetail
+                    disposicion={selectedDisposition.disposicion}
+                    tipo={selectedDisposition.tipo}
+                    idx={selectedDisposition.idx}
+                    pagesFull={pagesFull}
+                    pagesFullRaw={pagesFullRaw}
+                    frontMatterDropped={frontMatterDropped}
+                    pagesCount={pagesCount}
+                    sourceFromBookmarks={mentalOutlineSource === 'bookmarks'}
+                    mentalOutline={mentalOutline}
+                    lawName={lawName}
+                  />
                 ) : (
                   <div className="flex flex-col items-center justify-center h-full min-h-[400px] text-center p-8 bg-gradient-to-br from-slate-50 to-white rounded-xl border-2 border-dashed border-slate-300">
                     <div className="text-5xl mb-4">📄</div>
-                    <h3 className="text-lg font-semibold text-slate-700 mb-2">Selecciona un artículo</h3>
+                    <h3 className="text-lg font-semibold text-slate-700 mb-2">Selecciona un artículo o disposición</h3>
                     <p className="text-sm text-slate-500 max-w-sm">
-                      Haz clic en cualquier artículo del índice para ver su contenido y resumen aquí
+                      Haz clic en cualquier artículo o disposición del índice para ver su contenido y resumen aquí
                     </p>
                   </div>
                 )}
@@ -1831,6 +2909,7 @@ export default function GeneratePage() {
                 onSelect={(f) => {
                   setPdfFile(f)
                   setSelectedArticle(null) // Limpiar el artículo seleccionado al seleccionar un nuevo archivo
+                  setSelectedDisposition(null) // Limpiar la disposición seleccionada al seleccionar un nuevo archivo
                   // No auto-completar el nombre de la ley desde el archivo
                 }}
               />
@@ -2015,9 +3094,42 @@ export default function GeneratePage() {
                     <button
                       type="button"
                       onClick={generateMentalOutlineDirect}
-                      disabled={mentalOutlineLoading || !pagesFull.length}
+                      disabled={(() => {
+                        if (mentalOutlineLoading || !pagesFull.length) return true
+                        // Bloquear si "Desde Bookmarks" está disponible
+                        const countAllBookmarks = (items: any[]): number => {
+                          let count = 0
+                          for (const item of items) {
+                            count++
+                            if (item.children && Array.isArray(item.children) && item.children.length > 0) {
+                              count += countAllBookmarks(item.children)
+                            }
+                          }
+                          return count
+                        }
+                        const totalBookmarks = bookmarks.length > 0 ? countAllBookmarks(bookmarks) : 0
+                        const bookmarksAvailable = pagesCount && totalBookmarks > pagesCount
+                        return bookmarksAvailable // Bloquear si bookmarks están disponibles
+                      })()}
                       className="h-9 px-3 rounded-lg bg-green-600 text-white text-sm disabled:opacity-50"
-                      title="Genera el esquema mental directamente desde el índice del PDF sin usar IA"
+                      title={(() => {
+                        const countAllBookmarks = (items: any[]): number => {
+                          let count = 0
+                          for (const item of items) {
+                            count++
+                            if (item.children && Array.isArray(item.children) && item.children.length > 0) {
+                              count += countAllBookmarks(item.children)
+                            }
+                          }
+                          return count
+                        }
+                        const totalBookmarks = bookmarks.length > 0 ? countAllBookmarks(bookmarks) : 0
+                        const bookmarksAvailable = pagesCount && totalBookmarks > pagesCount
+                        if (bookmarksAvailable) {
+                          return 'Usa "Desde Bookmarks" para generar el esquema cuando hay bookmarks disponibles'
+                        }
+                        return "Genera el esquema mental directamente desde el índice del PDF sin usar IA"
+                      })()}
                     >
                       {mentalOutlineLoading ? 'Generando…' : 'Generar'}
                     </button>

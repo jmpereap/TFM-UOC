@@ -1,7 +1,7 @@
 'use client'
 
 import { useMemo } from 'react'
-import type { MentalOutline } from '@/types/mentalOutline'
+import type { MentalOutline, DisposicionItem } from '@/types/mentalOutline'
 
 type Articulo = NonNullable<MentalOutline['titulos'][number]['articulos']>[number]
 type Capitulo = MentalOutline['titulos'][number]['capitulos'][number]
@@ -11,7 +11,9 @@ type Titulo = MentalOutline['titulos'][number]
 interface LegalOutlineTreeProps {
   outline: MentalOutline
   selectedArticleAnchor?: string | null
+  selectedDispositionAnchor?: string | null
   onArticleSelect?: (art: Articulo, idx: number) => void
+  onDispositionSelect?: (disposicion: DisposicionItem, tipo: 'adicionales' | 'transitorias' | 'derogatorias' | 'finales', idx: number) => void
 }
 
 // Función auxiliar para formatear páginas
@@ -30,6 +32,17 @@ function normalizeArticleNumber(raw: string | undefined | null, text: string | u
   if (text) {
     const match = text.match(/Artículo\s+([\wºª\.]+(?:\s+(?:bis|ter|quater|quinquies))?)/i)
     if (match) return match[1].replace(/\.$/, '').trim()
+  }
+  return String(index + 1)
+}
+
+// Función auxiliar para normalizar números de disposición
+function normalizeDispositionNumber(item: DisposicionItem, index: number) {
+  const cleaned = item.numero?.replace(/\?/g, '').trim()
+  if (cleaned) return cleaned
+  const match = item.texto_encabezado?.match(/Disposici[óo]n\s+(?:Adicional|Transitoria|Derogatoria|Final)\s+([\wáéíóúüñºª]+)/i)
+  if (match && match[1]) {
+    return match[1].replace(/\.$/, '').trim()
   }
   return String(index + 1)
 }
@@ -318,12 +331,172 @@ function TitleNode({
   )
 }
 
+// Componente para disposiciones
+function DispositionNode({
+  items,
+  type,
+  label,
+  selectedDispositionAnchor,
+  onDispositionSelect,
+}: {
+  items: DisposicionItem[]
+  type: 'adicionales' | 'transitorias' | 'derogatorias' | 'finales'
+  label: string
+  selectedDispositionAnchor?: string | null
+  onDispositionSelect?: (disposicion: DisposicionItem, tipo: 'adicionales' | 'transitorias' | 'derogatorias' | 'finales', idx: number) => void
+}) {
+  if (!items || items.length === 0) return null
+
+  const getColorClasses = () => {
+    switch (type) {
+      case 'adicionales':
+        return {
+          bg: 'bg-purple-50',
+          border: 'border-purple-200',
+          text: 'text-purple-700',
+          badge: 'bg-purple-100',
+        }
+      case 'transitorias':
+        return {
+          bg: 'bg-blue-50',
+          border: 'border-blue-200',
+          text: 'text-blue-700',
+          badge: 'bg-blue-100',
+        }
+      case 'derogatorias':
+        return {
+          bg: 'bg-red-50',
+          border: 'border-red-200',
+          text: 'text-red-700',
+          badge: 'bg-red-100',
+        }
+      case 'finales':
+        return {
+          bg: 'bg-green-50',
+          border: 'border-green-200',
+          text: 'text-green-700',
+          badge: 'bg-green-100',
+        }
+    }
+  }
+
+  const colors = getColorClasses()
+
+  // Función para normalizar el número de disposición
+  const normalizeDispositionNumber = (item: DisposicionItem, index: number) => {
+    const cleaned = item.numero?.replace(/\?/g, '').trim()
+    if (cleaned) return cleaned
+    const match = item.texto_encabezado?.match(/Disposici[óo]n\s+(?:Adicional|Transitoria|Derogatoria|Final)\s+([\wáéíóúüñºª]+)/i)
+    if (match && match[1]) {
+      return match[1].replace(/\.$/, '').trim()
+    }
+    return String(index + 1)
+  }
+
+  // Función para normalizar el texto de la disposición, eliminando el prefijo duplicado
+  const normalizeDispositionText = (item: DisposicionItem, tipoLabel: string, number: string) => {
+    // Si no hay texto_encabezado, construir el texto básico
+    if (!item.texto_encabezado) {
+      return `Disposición ${tipoLabel} ${number || '(sin número)'}`
+    }
+    
+    let texto = item.texto_encabezado.trim()
+    
+    // Detectar si hay duplicación: "Disposición {tipo} Disposición {tipo} {número}"
+    // Buscar la segunda ocurrencia de "Disposición" (case-insensitive)
+    const lowerTexto = texto.toLowerCase()
+    const firstDisposition = lowerTexto.indexOf('disposición')
+    
+    if (firstDisposition !== -1) {
+      // Buscar la segunda ocurrencia después de la primera
+      const afterFirst = lowerTexto.substring(firstDisposition + 'disposición'.length)
+      const secondDisposition = afterFirst.toLowerCase().indexOf('disposición')
+      
+      if (secondDisposition !== -1) {
+        // Hay duplicación: eliminar la primera ocurrencia y todo hasta la segunda
+        // Ejemplo: "Disposición Adicional Disposición adicional primera" 
+        // -> "Disposición adicional primera"
+        const startSecond = firstDisposition + 'disposición'.length + secondDisposition
+        texto = texto.substring(startSecond).trim()
+      }
+    }
+    
+    // Si el texto ya empieza con "Disposición" (en cualquier variación), usarlo directamente
+    const startsWithDisposition = /^Disposici[óo]n\s+/i.test(texto)
+    
+    if (startsWithDisposition) {
+      // El texto ya tiene el prefijo "Disposición", usarlo tal cual sin agregar nada más
+      return texto
+    }
+    
+    // Si no empieza con "Disposición", construir el texto completo
+    return `Disposición ${tipoLabel} ${number || '(sin número)'}${texto ? ` ${texto}` : ''}`
+  }
+
+  return (
+    <details className="group/details">
+      <summary className={`flex items-center gap-2 px-4 py-3 text-sm font-bold ${colors.text} hover:opacity-80 cursor-pointer list-none [&::-webkit-details-marker]:hidden ${colors.bg} rounded-lg border ${colors.border} mb-2`}>
+        <span className={`${colors.text} group-open/details:rotate-90 transition-transform duration-200 inline-block text-lg`}>▶</span>
+        <div className="flex-1">
+          <div className="flex items-center gap-2">
+            <span className="text-xs uppercase tracking-wide font-bold">{label}</span>
+            <span className={`text-[10px] px-2 py-0.5 rounded ${colors.badge} ${colors.text} font-medium`}>
+              {items.length}
+            </span>
+          </div>
+        </div>
+      </summary>
+      <div className="mt-2 space-y-1 pl-4 border-l-2 border-slate-200">
+		{items.map((item, idx) => {
+			const isSelected = item.anchor === selectedDispositionAnchor
+			const displayText = (item.numero || '').trim()
+
+			return (
+				<button
+				key={item.anchor || `dispos-${type}-${idx}`}
+				onClick={() => onDispositionSelect?.(item, type, idx)}
+				type="button"
+				className={`w-full text-left px-3 py-2 text-xs rounded-md border transition-all duration-200 flex items-center gap-2 ${
+				isSelected
+				? `${colors.border} border-2 bg-white shadow-sm`
+				: 'border-slate-200 bg-white hover:bg-slate-50 hover:border-slate-300'
+			}`}
+		>
+		<span className={`flex-shrink-0 text-xs ${isSelected ? colors.text : 'text-slate-400'}`}>
+			{isSelected ? '●' : '○'}
+		</span>
+		<span className="font-semibold text-slate-700">
+			{displayText}
+		</span>
+		{formatPages(item.pages) && (
+			<span className={`ml-auto text-[10px] px-1.5 py-0.5 rounded flex-shrink-0 ${isSelected ? colors.badge + ' ' + colors.text : 'bg-slate-100 text-slate-600'}`}>
+				{formatPages(item.pages).replace(/^p\.\s*/, '')}
+			</span>
+		)}
+		</button>
+		)
+		})}
+      </div>
+    </details>
+  )
+}
+
 // Componente principal
 export default function LegalOutlineTree({
   outline,
   selectedArticleAnchor,
+  selectedDispositionAnchor,
   onArticleSelect,
+  onDispositionSelect,
 }: LegalOutlineTreeProps) {
+  // Normalizar disposiciones para asegurar que todas las claves estén presentes
+  const disposicionesNormalizadas = {
+    adicionales: outline.disposiciones?.adicionales || [],
+    transitorias: outline.disposiciones?.transitorias || [],
+    derogatorias: outline.disposiciones?.derogatorias || [],
+    finales: outline.disposiciones?.finales || [],
+  }
+
   return (
     <div className="space-y-3">
       {outline.titulos.map((titulo, index) => (
@@ -335,6 +508,36 @@ export default function LegalOutlineTree({
           onArticleSelect={onArticleSelect}
         />
       ))}
+      
+      {/* Renderizar disposiciones */}
+      <DispositionNode
+        items={disposicionesNormalizadas.adicionales}
+        type="adicionales"
+        label="DISPOSICIONES ADICIONALES"
+        selectedDispositionAnchor={selectedDispositionAnchor}
+        onDispositionSelect={onDispositionSelect}
+      />
+      <DispositionNode
+        items={disposicionesNormalizadas.transitorias}
+        type="transitorias"
+        label="DISPOSICIONES TRANSITORIAS"
+        selectedDispositionAnchor={selectedDispositionAnchor}
+        onDispositionSelect={onDispositionSelect}
+      />
+      <DispositionNode
+        items={disposicionesNormalizadas.derogatorias}
+        type="derogatorias"
+        label="DISPOSICIONES DEROGATORIAS"
+        selectedDispositionAnchor={selectedDispositionAnchor}
+        onDispositionSelect={onDispositionSelect}
+      />
+      <DispositionNode
+        items={disposicionesNormalizadas.finales}
+        type="finales"
+        label="DISPOSICIONES FINALES"
+        selectedDispositionAnchor={selectedDispositionAnchor}
+        onDispositionSelect={onDispositionSelect}
+      />
     </div>
   )
 }

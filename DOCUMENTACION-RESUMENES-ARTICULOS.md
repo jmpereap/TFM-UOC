@@ -352,3 +352,7 @@ const shouldUseFallback = !extractedData.found || isIndexContent || isTooShort
 - Total: hasta 11 páginas analizadas (`app/api/mental-outline/extract-article/route.ts` líneas 760-761)
 
 
+
+
+
+

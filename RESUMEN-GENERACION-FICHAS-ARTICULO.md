@@ -370,3 +370,7 @@ Si solo hay rúbrica (sin texto):
 - [ ] Soporte para múltiples idiomas en el formato
 
 
+
+
+
+

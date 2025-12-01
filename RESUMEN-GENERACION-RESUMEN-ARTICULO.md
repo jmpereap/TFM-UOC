@@ -331,3 +331,7 @@ El sistema incluye logging extensivo en cada etapa:
 - [ ] Mejorar manejo de artículos con tablas o listas complejas
 
 
+
+
+
+

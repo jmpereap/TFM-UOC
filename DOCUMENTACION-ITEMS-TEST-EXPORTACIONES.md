@@ -354,3 +354,7 @@ Todos los archivos exportados usan nombres **fijos** sin variación:
 4. **Normalización:** La dificultad se normaliza en `callModel.ts` (líneas 105-112) para manejar variaciones de escritura
 
 
+
+
+
+

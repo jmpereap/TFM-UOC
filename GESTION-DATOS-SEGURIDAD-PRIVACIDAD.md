@@ -532,3 +532,7 @@ La aplicación está diseñada con **privacidad por defecto**: no almacena datos
 **Recomendación principal:** Implementar política de privacidad explícita y consentimiento antes de procesar documentos.
 
 
+
+
+
+

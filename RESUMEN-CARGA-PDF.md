@@ -480,3 +480,7 @@ El sistema incluye logging en puntos clave:
 - [ ] Procesamiento en streaming para PDFs muy grandes
 
 
+
+
+
+

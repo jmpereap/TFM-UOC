@@ -54,7 +54,15 @@ export function convertBookmarksToMentalOutline(
   const preambuloPattern = /\[?Pre[áa]mbulo\]?/i
   const preambuloPatternNoAccent = /\[?Pre[áa]mbulo\]?/i
   const exposicionPattern = /Exposici[óo]n\s+de\s+motivos/i
-  const disposicionPattern = /Disposici[óo]n\s+(Adicional|Transitoria|Derogatoria|Final)/i
+  // Patrón más flexible para disposiciones: acepta "Disposición Adicional", "Disposición Transitoria", etc.
+  // También acepta variaciones como "Disposición adicional primera", "Disposición transitoria primera", etc.
+  // Acepta tanto singular como plural: "Disposición" o "Disposiciones"
+  // Acepta con o sin mayúsculas/minúsculas
+  // Acepta puntos después del número: "Disposición adicional cuarta."
+  // El patrón busca: "Disposición/Disposiciones" + espacio + tipo + (opcionalmente: espacio + número + punto opcional)
+  // Corregido: Disposici[óo]n(?:es)? para manejar correctamente singular/plural
+  const disposicionPattern = /Disposici[óo]n(?:es)?\s+(Adicional|Transitoria|Derogatoria|Final)(?:\s+(?:[Pp]rimera|[Ss]egunda|[Tt]ercera|[Cc]uarta|[Qq]uinta|[Ss]exta|[Ss]éptima|[Ss]eptima|[Oo]ctava|[Nn]ovena|[Dd]écima|[Dd]ecima|undécima|duodécima|\d+[ªº]?))?\.?/i
+  const disposicionPatternNoAccent = /Disposicion(?:es)?\s+(Adicional|Transitoria|Derogatoria|Final)(?:\s+(?:[Pp]rimera|[Ss]egunda|[Tt]ercera|[Cc]uarta|[Qq]uinta|[Ss]exta|[Ss]eptima|[Oo]ctava|[Nn]ovena|[Dd]ecima|undécima|duodécima|\d+[ªº]?))?\.?/i
 
   // Variables de estado para el procesamiento
   let currentTitulo: Titulo | null = null
@@ -114,12 +122,25 @@ export function convertBookmarksToMentalOutline(
   }
 
   // Función recursiva para procesar bookmarks
-  function processBookmark(bookmark: BookmarkItem, level: number = 0) {
+  // parentDispositionType: tipo de disposición del contexto padre (si estamos dentro de un encabezado de sección)
+  function processBookmark(bookmark: BookmarkItem, level: number = 0, parentDispositionType?: string) {
     const rawTitle = bookmark.title?.trim() || ''
     const title = normalizeTitle(rawTitle)
     const pageNumber = bookmark.pageNumber
 
     if (!title) return
+    
+    // Log para debugging cuando hay parentDispositionType
+    if (parentDispositionType && level > 0) {
+      logEvent('mentalOutline.bookmarks.processingChild', {
+        level,
+        title: title.substring(0, 100),
+        rawTitle: rawTitle.substring(0, 100),
+        parentDispositionType,
+        pageNumber,
+        hasChildren: !!(bookmark.children && bookmark.children.length > 0)
+      })
+    }
 
     // PREÁMBULO (puede tener corchetes: [Preámbulo])
     if (preambuloPattern.test(title) || preambuloPatternNoAccent.test(title)) {
@@ -407,30 +428,188 @@ export function convertBookmarksToMentalOutline(
       return
     }
 
-    // DISPOSICIÓN
-    if (disposicionPattern.test(title)) {
-      const match = title.match(disposicionPattern)
+    // DISPOSICIÓN (aceptar con o sin acentos)
+    // Log para verificar si el código llega a esta sección
+    if (parentDispositionType) {
+      logEvent('mentalOutline.bookmarks.beforeDisposicionCheck', {
+        title: title.substring(0, 100),
+        rawTitle: rawTitle.substring(0, 100),
+        parentDispositionType,
+        level
+      })
+    }
+    
+    const isDisposicion = disposicionPattern.test(title) || disposicionPatternNoAccent.test(title)
+    
+    // Log para verificar el resultado del test
+    if (parentDispositionType) {
+      logEvent('mentalOutline.bookmarks.disposicion.test', {
+        title: title.substring(0, 100),
+        rawTitle: rawTitle.substring(0, 100),
+        isDisposicion,
+        testPattern1: disposicionPattern.test(title),
+        testPattern2: disposicionPatternNoAccent.test(title),
+        parentDispositionType,
+        level
+      })
+    }
+    
+    if (isDisposicion) {
+      // Detectar encabezados de sección (con o sin corchetes, plural o singular)
+      // Ejemplos: "[Disposiciones adicionales]", "DISPOSICIONES TRANSITORIAS", "Disposiciones finales"
+      // Patrón más flexible: acepta corchetes opcionales, plural/singular, y el tipo al final
+      const sectionHeaderPattern = /^(?:\[?.*)?Disposiciones?\s+(Adicional|Transitoria|Derogatoria|Final)(?:es?)?.*\]?$/i
+      const isSectionHeader = sectionHeaderPattern.test(title)
+      
+      if (isSectionHeader) {
+        // Es un encabezado de sección, extraer el tipo y pasarlo a los hijos
+        let match = title.match(/Disposiciones?\s+(Adicional|Transitoria|Derogatoria|Final)/i)
+        if (!match) {
+          // Intentar con patrón más flexible
+          match = title.match(/(Adicional|Transitoria|Derogatoria|Final)/i)
+        }
+        const tipoDisposicion = match ? match[1].toLowerCase() : undefined
+        
+        logEvent('mentalOutline.bookmarks.disposicion.sectionHeader', { 
+          title, 
+          pageNumber, 
+          rawTitle,
+          tipoDisposicion,
+          childrenCount: bookmark.children?.length || 0,
+          childrenTitles: bookmark.children?.map(c => c.title?.substring(0, 100)) || []
+        })
+        if (bookmark.children && bookmark.children.length > 0) {
+          for (const child of bookmark.children) {
+            processBookmark(child, level + 1, tipoDisposicion)
+          }
+        }
+        return
+      }
+      
+      // Intentar extraer con ambos patrones
+      let match = title.match(disposicionPattern)
+      if (!match) {
+        match = title.match(disposicionPatternNoAccent)
+      }
+      
+      logEvent('mentalOutline.bookmarks.disposicion.checking', {
+        title: title.substring(0, 100),
+        rawTitle: rawTitle.substring(0, 100),
+        isDisposicion,
+        hasMatch: !!match,
+        matchType: match ? match[1] : null,
+        parentDispositionType,
+        level
+      })
+      
       if (match) {
         const tipo = match[1].toLowerCase()
         const tipoKey = tipo === 'adicional' ? 'adicionales' :
                        tipo === 'transitoria' ? 'transitorias' :
                        tipo === 'derogatoria' ? 'derogatorias' : 'finales'
         
-        const textoEncabezado = extractSubtitle(title, disposicionPattern)
-        
-        const disposicion: DisposicionItem = {
-          numero: `Disposición ${match[1]}`,
-          texto_encabezado: textoEncabezado,
-          pagina_disposicion: pageNumber || 0,
-          pages: pageNumber ? [pageNumber] : [],
-          anchor: generateAnchor('dis', match[1]),
+        // Extraer número de disposición si existe (primera, segunda, tercera, etc. o número)
+        // Acepta punto después del número: "cuarta.", "primera."
+        let numeroDisposicion = ''
+        const numeroMatch = title.match(/(?:[Pp]rimera|[Ss]egunda|[Tt]ercera|[Cc]uarta|[Qq]uinta|[Ss]exta|[Ss]éptima|[Ss]eptima|[Oo]ctava|[Nn]ovena|[Dd]écima|[Dd]ecima|undécima|duodécima|\d+[ªº]?)(?:\.\s*)?/i)
+        if (numeroMatch) {
+          // Remover el punto si existe para guardar solo el número
+          numeroDisposicion = numeroMatch[0].replace(/\.\s*$/, '').trim()
         }
         
-        outline.disposiciones[tipoKey].push(disposicion)
-        logEvent('mentalOutline.bookmarks.disposicion', { tipo, textoEncabezado, pageNumber, title })
+        logEvent('mentalOutline.bookmarks.disposicion.processing', {
+          title: title.substring(0, 100),
+          rawTitle: rawTitle.substring(0, 100),
+          match: match ? match[1] : null,
+          numeroMatch: numeroMatch ? numeroMatch[0] : null,
+          numeroDisposicion,
+          hasNumber: !!numeroDisposicion,
+          parentDispositionType,
+          level,
+          tipoKey
+        })
+        
+        // Crear disposición si tiene número O si no tiene hijos (es una disposición individual sin número)
+        // Si no tiene número pero tiene hijos, es un encabezado de sección
+        const hasChildren = !!(bookmark.children && bookmark.children.length > 0)
+        const shouldCreateDisposition = numeroDisposicion || !hasChildren
+        
+        if (shouldCreateDisposition) {
+          // Extraer texto del encabezado (todo lo que viene después del tipo y número)
+          let textoEncabezado = ''
+          // Buscar el tipo en el título (case-insensitive)
+          const tipoIndex = title.toLowerCase().indexOf(match[1].toLowerCase())
+          const afterTipo = tipoIndex !== -1 ? title.substring(tipoIndex + match[1].length).trim() : title
+          
+          if (numeroMatch) {
+            // Buscar el texto después del número (puede haber un punto)
+            // Buscar el número en el título completo (case-insensitive)
+            const numeroLower = numeroMatch[0].toLowerCase()
+            const titleLower = title.toLowerCase()
+            const numeroIndexInTitle = titleLower.indexOf(numeroLower)
+            
+            if (numeroIndexInTitle !== -1) {
+              const afterNumero = title.substring(numeroIndexInTitle + numeroMatch[0].length).trim()
+              textoEncabezado = afterNumero.replace(/^[—–\-•:.\s]+/, '').trim()
+            }
+          } else {
+            // No hay número, el texto después del tipo es el encabezado
+            textoEncabezado = afterTipo.replace(/^[—–\-•:.\s]+/, '').trim()
+          }
+          
+          // Construir el número completo: con número o solo el tipo
+          const numeroCompleto = numeroDisposicion 
+            ? `Disposición ${match[1]} ${numeroDisposicion}`
+            : `Disposición ${match[1]}`
+          
+          const disposicion: DisposicionItem = {
+            numero: numeroCompleto,
+            texto_encabezado: textoEncabezado,
+            pagina_disposicion: pageNumber || 0,
+            pages: pageNumber ? [pageNumber] : [],
+            anchor: generateAnchor('dis', numeroDisposicion 
+              ? `${match[1]}-${numeroDisposicion.toLowerCase()}`
+              : `${match[1]}-unica`),
+          }
+          
+          outline.disposiciones[tipoKey].push(disposicion)
+          logEvent('mentalOutline.bookmarks.disposicion', { 
+            tipo, 
+            numeroDisposicion: numeroDisposicion || '(sin número)', 
+            textoEncabezado, 
+            pageNumber, 
+            title, 
+            rawTitle 
+          })
+          
+          // Procesar hijos recursivamente (las disposiciones pueden tener sub-elementos como artículos)
+          if (bookmark.children && bookmark.children.length > 0) {
+            for (const child of bookmark.children) {
+              processBookmark(child, level + 1)
+            }
+          }
+          return
+        } else {
+          // No tiene número pero tiene hijos, es un encabezado de sección
+          // Procesar hijos con el tipo de disposición
+          logEvent('mentalOutline.bookmarks.disposicion.noNumber', { 
+            title, 
+            pageNumber, 
+            rawTitle,
+            tipo: match[1].toLowerCase(),
+            hasChildren: true,
+            childrenCount: bookmark.children?.length || 0
+          })
+          
+          const tipoDisposicion = match[1].toLowerCase()
+          for (const child of bookmark.children) {
+            processBookmark(child, level + 1, tipoDisposicion)
+          }
+          return
+        }
       }
       
-      // Procesar hijos recursivamente
+      // Procesar hijos recursivamente (las disposiciones pueden tener sub-elementos)
       if (bookmark.children && bookmark.children.length > 0) {
         for (const child of bookmark.children) {
           processBookmark(child, level + 1)
@@ -439,11 +618,68 @@ export function convertBookmarksToMentalOutline(
       return
     }
 
+    // Intentar detectar disposiciones con formatos más simples (sin "Disposición" al inicio)
+    // Esto es útil cuando las disposiciones están dentro de encabezados de sección
+    // Patrones: "Primera", "Segunda", "Cuarta.", "1ª", "1.", etc. seguidos de texto opcional
+    if (parentDispositionType) {
+      // Patrón que acepta número con punto opcional al final, seguido de texto opcional
+      const simpleDisposicionPattern = /^([Pp]rimera|[Ss]egunda|[Tt]ercera|[Cc]uarta|[Qq]uinta|[Ss]exta|[Ss]éptima|[Ss]eptima|[Oo]ctava|[Nn]ovena|[Dd]écima|[Dd]ecima|undécima|duodécima|\d+[ªº]?)(?:\.\s*)?\s*(.+)?$/i
+      const simpleMatch = title.match(simpleDisposicionPattern)
+      
+      if (simpleMatch) {
+        // Remover punto del número si existe
+        const numeroDisposicion = simpleMatch[1].replace(/\.\s*$/, '').trim()
+        const textoEncabezado = simpleMatch[2] ? simpleMatch[2].trim() : ''
+        const tipoKey = parentDispositionType === 'adicional' ? 'adicionales' :
+                       parentDispositionType === 'transitoria' ? 'transitorias' :
+                       parentDispositionType === 'derogatoria' ? 'derogatorias' : 'finales'
+        
+        const numeroCompleto = `Disposición ${parentDispositionType.charAt(0).toUpperCase() + parentDispositionType.slice(1)} ${numeroDisposicion}`
+        
+        const disposicion: DisposicionItem = {
+          numero: numeroCompleto,
+          texto_encabezado: textoEncabezado,
+          pagina_disposicion: pageNumber || 0,
+          pages: pageNumber ? [pageNumber] : [],
+          anchor: generateAnchor('dis', `${parentDispositionType}-${numeroDisposicion.toLowerCase()}`),
+        }
+        
+        outline.disposiciones[tipoKey].push(disposicion)
+        logEvent('mentalOutline.bookmarks.disposicion.simpleFormat', {
+          tipo: parentDispositionType,
+          numeroDisposicion,
+          textoEncabezado,
+          pageNumber,
+          title: title.substring(0, 100),
+          rawTitle
+        })
+        
+        // Procesar hijos recursivamente
+        if (bookmark.children && bookmark.children.length > 0) {
+          for (const child of bookmark.children) {
+            processBookmark(child, level + 1, parentDispositionType)
+          }
+        }
+        return
+      }
+    }
+    
     // Si no coincide con ningún patrón, procesar hijos recursivamente
-    // Esto permite manejar estructuras anidadas
+    // Esto permite manejar estructuras anidadas y encontrar elementos en niveles más profundos
     if (bookmark.children && bookmark.children.length > 0) {
       for (const child of bookmark.children) {
         processBookmark(child, level + 1)
+      }
+    } else {
+      // Log para debugging: elementos que no coincidieron con ningún patrón
+      // Solo loguear en niveles superiores para no saturar
+      if (level < 2) {
+        logEvent('mentalOutline.bookmarks.unmatched', { 
+          level, 
+          title: title.substring(0, 100), 
+          pageNumber,
+          hasChildren: !!(bookmark.children && bookmark.children.length > 0)
+        })
       }
     }
   }

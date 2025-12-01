@@ -100,6 +100,12 @@ export async function POST(req: NextRequest) {
         ),
       0
     )
+    
+    // Contar disposiciones
+    const totalDisposiciones = (outline.disposiciones?.adicionales?.length || 0) +
+                               (outline.disposiciones?.transitorias?.length || 0) +
+                               (outline.disposiciones?.derogatorias?.length || 0) +
+                               (outline.disposiciones?.finales?.length || 0)
 
     logEvent('mentalOutline.generate.fromBookmarks.success', {
       source: source || lawName,
@@ -107,6 +113,13 @@ export async function POST(req: NextRequest) {
       capitulos: totalCapitulos,
       secciones: totalSecciones,
       articulos: totalArticulos,
+      disposiciones: totalDisposiciones,
+      disposicionesDetalle: {
+        adicionales: outline.disposiciones?.adicionales?.length || 0,
+        transitorias: outline.disposiciones?.transitorias?.length || 0,
+        derogatorias: outline.disposiciones?.derogatorias?.length || 0,
+        finales: outline.disposiciones?.finales?.length || 0,
+      },
       validation,
       estructura: outline.titulos.map((t) => ({
         titulo: t.codigo_titulo || t.ordinal,
@@ -140,6 +153,13 @@ export async function POST(req: NextRequest) {
         capitulos: totalCapitulos,
         secciones: totalSecciones,
         articulos: totalArticulos,
+        disposiciones: totalDisposiciones,
+        disposicionesDetalle: {
+          adicionales: outline.disposiciones?.adicionales?.length || 0,
+          transitorias: outline.disposiciones?.transitorias?.length || 0,
+          derogatorias: outline.disposiciones?.derogatorias?.length || 0,
+          finales: outline.disposiciones?.finales?.length || 0,
+        },
       },
     })
   } catch (error: any) {

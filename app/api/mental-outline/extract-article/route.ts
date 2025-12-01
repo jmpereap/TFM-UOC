@@ -149,8 +149,11 @@ function extractArticleFromText(
   
   // Patrón para buscar el siguiente delimitador (excluyendo el artículo actual)
   const nextDelimiterPattern = new RegExp(
-    `(?:^|\\n)\\s*(?:Artículo\\s+(?!${normalizedNum}(?:\\s*(?:bis|ter|quater|quinquies|sexies|septies|octies|nonies|decies))?\\s*\\.)[\\d]+(?:\\s*(?:bis|ter|quater|quinquies|sexies|septies|octies|nonies|decies))?\\s*\\.|TÍTULO|CAPÍTULO|SECCIÓN|DISPOSICIÓN)`,
-    'gim'
+    `(?:^|\\n)\\s*(?:` +
+      `Artículo\\s+(?!${normalizedNum}(?:\\s*(?:bis|ter|quater|quinquies|sexies|septies|octies|nonies|decies))?\\s*\\.)` +
+        `[\\d]+(?:\\s*(?:bis|ter|quater|quinquies|sexies|septies|octies|nonies|decies))?\\s*\\.(?!\\d)` +
+      `|TÍTULO|CAPÍTULO|SECCIÓN|DISPOSICIÓN)`,
+    'gm'
   )
   
   // Buscar todas las cabeceras y pies de página en el texto original
@@ -318,80 +321,55 @@ function findArticleEnd(text: string, currentArticleNum: string): number {
   // 5. DISPOSICIÓN
   // 6. Final del texto
   // IMPORTANTE: El pie de página NO es un delimitador - el artículo puede continuar después del pie
-  
+
   let earliestEnd = text.length
-  
-  // Patrón para cualquier artículo (puede estar al inicio de línea o en medio)
-  // Excluir el artículo actual
-  // IMPORTANTE: matchAll requiere el flag 'g' (global)
-  // Buscar "Artículo Y." donde Y != currentArticleNum
+
+  // 1) Patrón para cualquier cabecera de artículo:
+  //    - Debe estar al inicio lógico de línea (^ o \n) con posible sangría
+  //    - Debe ser "Artículo" con A mayúscula (sin flag 'i')
+  //    - Debe tener número "entero" (no 2.2, 9.2, etc.) gracias a \\.(?!\\d)
+  //    - Excluimos el artículo actual (currentArticleNum)
   const anyArticlePattern = new RegExp(
-    `(?:^|\\n|\\s)Artículo\\s+(?!${currentArticleNum}(?:\\s*(?:bis|ter|quater|quinquies|sexies|septies|octies|nonies|decies))?\\s*\\.)[\\d]+(?:\\s*(?:bis|ter|quater|quinquies|sexies|septies|octies|nonies|decies))?\\s*\\.`,
-    'gim'
+    String.raw`(?:^|\n)\s*Artículo\s+` +
+      String.raw`(?!${currentArticleNum}(?:\s*(?:bis|ter|quater|quinquies|sexies|septies|octies|nonies|decies))?\s*\.)` +
+      String.raw`[\d]+(?:\s*(?:bis|ter|quater|quinquies|sexies|septies|octies|nonies|decies))?\s*\.(?!\d)`,
+    'gm'
   )
-  
+
   const articleMatches = Array.from(text.matchAll(anyArticlePattern))
   if (articleMatches.length > 0) {
-    // Encontramos otro artículo, el actual termina ANTES de este
     const nextArticleMatch = articleMatches[0]
     const nextArticleIndex = nextArticleMatch.index!
-    
-    // El patrón puede incluir espacios o saltos de línea al inicio
-    // Necesitamos encontrar dónde empieza realmente "Artículo Y."
-    let actualArticleStart = nextArticleIndex
-    
-    // Si el match empieza con espacio o salto de línea, ajustar
-    if (nextArticleMatch[0] && (nextArticleMatch[0].startsWith(' ') || nextArticleMatch[0].startsWith('\n'))) {
-      // Buscar dónde empieza "Artículo" en el match
-      const articuloStartInMatch = nextArticleMatch[0].indexOf('Artículo')
-      if (articuloStartInMatch >= 0) {
-        actualArticleStart = nextArticleIndex + articuloStartInMatch
+
+    // El match empieza justo en el salto de línea o principio de texto,
+    // pero por seguridad, cortamos en el salto de línea anterior (si lo hay)
+    let cutIndex = nextArticleIndex
+    if (nextArticleIndex > 0 && text[nextArticleIndex] !== '\n') {
+      const lineBreakIndex = text.lastIndexOf('\n', nextArticleIndex)
+      if (lineBreakIndex >= 0) {
+        cutIndex = lineBreakIndex
       }
     }
-    
-    // Buscar el salto de línea antes del siguiente artículo
-    // Si no hay salto de línea, buscar espacios o cualquier separador
-    let cutIndex = actualArticleStart
-    
-    // Buscar hacia atrás para encontrar el salto de línea más cercano
-    const lineBreakIndex = text.lastIndexOf('\n', actualArticleStart)
-    if (lineBreakIndex >= 0) {
-      cutIndex = lineBreakIndex
-    } else {
-      // Si no hay salto de línea, buscar espacios antes de "Artículo"
-      // Pero solo si hay suficiente espacio (más de 5 caracteres) para evitar cortar en medio de una palabra
-      if (actualArticleStart > 5) {
-        const spaceBefore = text.lastIndexOf(' ', actualArticleStart)
-        if (spaceBefore >= 0 && actualArticleStart - spaceBefore < 20) {
-          // Solo cortar en espacio si está cerca (dentro de 20 caracteres)
-          cutIndex = spaceBefore
-        }
-      }
-    }
-    
+
     earliestEnd = Math.min(earliestEnd, cutIndex)
   }
-  
-  // Buscar otros delimitadores (solo si no encontramos otro artículo antes)
+
+  // 2) Delimitadores estructurales (TÍTULO / CAPÍTULO / SECCIÓN / DISPOSICIÓN)
   if (earliestEnd === text.length) {
     const delimiterPatterns = [
-      /(?:^|\n)\s*TÍTULO\s+[IVXLCDM\d]+/gim,
-      /(?:^|\n)\s*CAPÍTULO\s+[IVXLCDM\d]+/gim,
-      /(?:^|\n)\s*SECCIÓN\s+[IVXLCDM\d]+/gim,
-      /(?:^|\n)\s*DISPOSICIÓN\s+(?:ADICIONAL|TRANSITORIA|DEROGATORIA|FINAL)/gim,
+      /(?:^|\n)\s*TÍTULO\s+[IVXLCDM\d]+/gm,
+      /(?:^|\n)\s*CAPÍTULO\s+[IVXLCDM\d]+/gm,
+      /(?:^|\n)\s*SECCIÓN\s+[IVXLCDM\d]+/gm,
+      /(?:^|\n)\s*DISPOSICIÓN\s+(?:ADICIONAL|TRANSITORIA|DEROGATORIA|FINAL)/gm,
     ]
-    
+
     for (const pattern of delimiterPatterns) {
-      const matches = Array.from(text.matchAll(pattern))
-      if (matches.length > 0) {
-        const matchIndex = matches[0].index!
-        // Buscar el salto de línea antes del delimitador
-        let cutIndex = matchIndex
-        if (matchIndex > 0 && text[matchIndex] !== '\n') {
-          const lineBreakIndex = text.lastIndexOf('\n', matchIndex)
-          if (lineBreakIndex >= 0) {
-            cutIndex = lineBreakIndex
-          }
+      const m = pattern.exec(text)
+      if (m && m.index > 0) {
+        let cutIndex = m.index
+        const lineBreakIndex = text.lastIndexOf('\n', cutIndex)
+        if (lineBreakIndex >= 0) {
+          cutIndex = lineBreakIndex
         }
         if (cutIndex < earliestEnd) {
           earliestEnd = cutIndex
@@ -399,7 +377,7 @@ function findArticleEnd(text: string, currentArticleNum: string): number {
       }
     }
   }
-  
+
   return earliestEnd
 }
 

@@ -579,3 +579,7 @@ metadata: {
 5. **Visualización:** `MentalOutline` → `LegalOutlineTree` (modo árbol) o JSON (modo JSON)
 
 
+
+
+
+

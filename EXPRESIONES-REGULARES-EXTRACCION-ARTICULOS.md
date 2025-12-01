@@ -467,3 +467,7 @@ new RegExp(
 - `lib/legal/fragments.ts` - Definición de `RX_BOE_FOOTER`
 - `lib/utils/articleSummary.ts` - Generación de resumen (usa el texto extraído)
 
+
+
+
+

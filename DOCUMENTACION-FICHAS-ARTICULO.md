@@ -465,3 +465,7 @@ No existe funcionalidad de exportación a PDF para fichas de artículo. Solo se 
 - Depende de la longitud del texto del artículo
 
 
+
+
+
+
