@@ -8,6 +8,7 @@ function stripCorrect(items: MCQItem[]): Omit<MCQItem, 'correcta'>[] {
   return items.map((it) => ({
     pregunta: it.pregunta,
     opciones: it.opciones,
+    difficulty: it.difficulty,
     justificacion: it.justificacion,
     referencia: it.referencia,
   }))
