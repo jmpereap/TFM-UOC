@@ -72,7 +72,7 @@ const questionSchema = {
 
 **Archivo:** `types/mcq.ts`  
 **Endpoint que devuelve:** `/api/generate` (POST)  
-**Tipo exportado desde:** `lib/qa/callModel.ts` (también se re-exporta desde `types/mcq.ts`)
+**Nota:** El tipo `MCQItem` también está definido en `lib/qa/callModel.ts` (líneas 10-17) con la misma estructura, pero la definición canónica está en `types/mcq.ts`
 
 ---
 
@@ -351,7 +351,639 @@ Todos los archivos exportados usan nombres **fijos** sin variación:
 1. **Generación:** Cliente → `/api/generate` → `callModel()` → Retorna `MCQItem[]`
 2. **Exportación:** Cliente → `/api/export` → `itemsToCSV()` / `itemsToPDF()` → Descarga archivo
 3. **Validación:** El schema JSON se valida en `callModel.ts` antes de retornar los ítems
-4. **Normalización:** La dificultad se normaliza en `callModel.ts` (líneas 105-112) para manejar variaciones de escritura
+4. **Normalización:** La dificultad se normaliza en `callModel.ts` (líneas 115-123) para manejar variaciones de escritura (acepta "basico"/"básico"/"basic", "medio"/"medium"/"intermedio", "avanzado"/"advanced", y por defecto usa "medio" si no se puede determinar)
+
+---
+
+# Documentación: Esquema Mental y Fichas
+
+## a) TypeScript Type del Esquema Mental
+
+### Tipo TypeScript
+
+```ts
+// types/mentalOutline.ts
+export type FrontMatterEntry = {
+  present: boolean
+  anchor: string | null
+  pages: number[] | null
+}
+
+export type Articulo = {
+  numero: string
+  articulo_texto: string
+  pagina_articulo: number
+  pages?: number[]
+  anchor?: string
+  texto_completo?: string
+  resumen?: string
+}
+
+export type Seccion = {
+  codigo_seccion?: string
+  subtitulo_seccion?: string
+  pagina_inicio_seccion: number
+  pagina_fin_seccion: number
+  articulos: Articulo[]
+  ordinal?: string
+  seccion_texto?: string
+  pages?: number[]
+  anchor?: string
+}
+
+export type Capitulo = {
+  codigo_capitulo?: string
+  subtitulo_capitulo?: string
+  pagina_inicio_capitulo: number
+  pagina_fin_capitulo: number
+  articulos_sin_seccion?: Articulo[]
+  secciones: Seccion[]
+  ordinal?: string
+  capitulo_texto?: string
+  pages?: number[]
+  anchor?: string
+  articulos?: Articulo[]
+}
+
+export type Titulo = {
+  codigo_titulo?: string
+  subtitulo_titulo?: string
+  pagina_inicio_titulo: number
+  pagina_fin_titulo: number
+  articulos_sin_capitulo?: Articulo[]
+  capitulos: Capitulo[]
+  ordinal?: string
+  titulo_texto?: string
+  pages?: number[]
+  anchor?: string
+  articulos?: Articulo[]
+}
+
+export type DisposicionItem = {
+  numero: string
+  texto_encabezado: string
+  pagina_disposicion: number
+  pages?: number[]
+  anchor?: string
+}
+
+export type MentalOutline = {
+  metadata: {
+    document_title: string
+    source: string
+    language: string
+    generated_at: string
+  }
+  front_matter: {
+    preambulo: FrontMatterEntry
+    exposicion_motivos: FrontMatterEntry
+  }
+  titulos: Titulo[]
+  disposiciones: {
+    adicionales: DisposicionItem[]
+    transitorias: DisposicionItem[]
+    derogatorias: DisposicionItem[]
+    finales: DisposicionItem[]
+  }
+}
+```
+
+**Archivo:** `types/mentalOutline.ts`  
+**Endpoints que devuelven:** 
+- `/api/mental-outline` (POST) - Genera esquema mental básico
+- `/api/mental-outline/generate-direct` (POST) - Genera esquema desde índice
+- `/api/mental-outline/generate-from-bookmarks` (POST) - Genera esquema desde bookmarks del PDF
+- `/api/mental-outline/chunk` (POST) - Genera esquema por chunks (procesamiento incremental)
+
+---
+
+## b) Endpoints de Generación del Esquema Mental
+
+### `/api/mental-outline` (POST)
+
+Genera un esquema mental básico desde las páginas del PDF.
+
+**Parámetros de entrada:**
+```typescript
+{
+  lawName: string
+  source: string
+  pagesFull: Array<{ num: number; text: string }>
+}
+```
+
+**Respuesta:**
+```typescript
+{
+  ok: boolean
+  outline: MentalOutline
+}
+```
+
+### `/api/mental-outline/generate-direct` (POST)
+
+Genera un esquema mental directamente desde el índice del documento.
+
+**Parámetros de entrada:**
+```typescript
+{
+  lawName: string
+  source: string
+  pagesFull: Array<{ num: number; text: string }>
+}
+```
+
+**Respuesta:**
+```typescript
+{
+  ok: boolean
+  schema: MentalOutline
+}
+```
+
+### `/api/mental-outline/generate-from-bookmarks` (POST)
+
+Genera un esquema mental desde los bookmarks del PDF.
+
+**Parámetros de entrada:**
+```typescript
+{
+  lawName: string
+  source: string
+  bookmarks: Array<BookmarkItem>
+}
+```
+
+**Respuesta:**
+```typescript
+{
+  ok: boolean
+  schema: MentalOutline
+  stats?: {
+    titulos: number
+    capitulos: number
+    secciones: number
+    articulos: number
+    disposiciones: number
+  }
+}
+```
+
+### `/api/mental-outline/chunk` (POST)
+
+Genera un esquema mental procesando el PDF por chunks (páginas).
+
+**Parámetros de entrada:**
+```typescript
+{
+  lawName: string
+  source: string
+  schema: MentalOutline | null  // Esquema acumulado (null en el primer chunk)
+  metadata: {
+    document_title: string
+    source: string
+    language: string
+    generated_at: string
+  }
+  pagesFull: Array<{ num: number; text: string }>  // Chunk de páginas
+  indice?: string  // Texto del índice detectado
+}
+```
+
+**Respuesta:**
+```typescript
+{
+  ok: boolean
+  schema: MentalOutline
+}
+```
+
+**Nota:** Este endpoint se llama múltiples veces en secuencia, acumulando el esquema en cada llamada.
+
+---
+
+## c) Fichas de Artículos
+
+### Tipo TypeScript de Datos de Ficha
+
+```ts
+// lib/outline/formatFiche.ts
+export type FicheData = {
+  lawName: string
+  context: ArticleContext | null
+  articleNumber: string
+  articleRubrica: string
+  articleText: string
+}
+
+export type ArticleContext = {
+  titulo: {
+    codigo?: string
+    subtitulo?: string
+    ordinal?: string
+  } | null
+  capitulo: {
+    codigo?: string
+    subtitulo?: string
+    ordinal?: string
+  } | null
+  seccion: {
+    codigo?: string
+    subtitulo?: string
+    ordinal?: string
+  } | null
+}
+```
+
+### Endpoint: `/api/mental-outline/generate-fiche` (POST)
+
+Genera una ficha formateada de un artículo.
+
+**Parámetros de entrada:**
+```typescript
+{
+  articleAnchor: string
+  lawName?: string
+  mentalOutline: MentalOutline
+  articleData: {
+    numero_articulo?: string
+    numero?: string
+    rubrica_articulo?: string
+    articulo_texto?: string
+    texto_completo?: string  // Prioridad 1: Texto completo extraído por IA
+    texto_articulo?: string  // Prioridad 2: Texto del artículo
+    resumen?: string         // Prioridad 3: Resumen generado por IA (fallback)
+  }
+}
+```
+
+**Respuesta:**
+```typescript
+{
+  ok: boolean
+  fiche: string  // Texto formateado de la ficha
+  format: 'text'
+}
+```
+
+### Estructura de la Ficha de Artículo
+
+La ficha se genera en formato de texto plano con la siguiente estructura:
+
+```
+═══════════════════════════════════════════════════════════
+                    FICHA DE ARTÍCULO
+═══════════════════════════════════════════════════════════
+
+📄 Documento: [Nombre del documento]
+
+Estructura:
+  📑 TÍTULO [ordinal] - [subtítulo]
+  📖 CAPÍTULO [ordinal] - [subtítulo]  (si existe)
+  📋 SECCIÓN [ordinal] - [subtítulo]   (si existe)
+
+───────────────────────────────────────────────────────────
+
+📌 Artículo [número]
+
+───────────────────────────────────────────────────────────
+
+Texto del artículo:
+
+[Texto formateado del artículo respetando \n de la IA]
+
+───────────────────────────────────────────────────────────
+```
+
+**Características:**
+- Respeta los saltos de línea (`\n`) que vienen de la IA
+- Incluye contexto jerárquico (Título, Capítulo, Sección) si está disponible
+- Elimina la rúbrica del inicio del texto si coincide con el texto completo
+- Prioridad del texto: `texto_completo` → `texto_articulo` → `resumen`
+
+**Archivo de formato:** `lib/outline/formatFiche.ts`  
+**Función:** `formatFiche(data: FicheData): string`
+
+---
+
+## d) Fichas de Disposiciones
+
+### Tipo TypeScript de Datos de Ficha
+
+```ts
+// lib/outline/formatFicheDisposition.ts
+export type FicheDispositionData = {
+  lawName: string
+  dispositionNumber: string
+  dispositionRubrica: string
+  dispositionText: string
+  dispositionType: 'adicionales' | 'transitorias' | 'derogatorias' | 'finales'
+}
+```
+
+### Endpoint: `/api/mental-outline/generate-fiche-disposition` (POST)
+
+Genera una ficha formateada de una disposición.
+
+**Parámetros de entrada:**
+```typescript
+{
+  dispositionAnchor: string
+  lawName?: string
+  mentalOutline: MentalOutline
+  dispositionData: {
+    tipo: string  // "Adicional", "Transitoria", "Derogatoria", "Final"
+    numero?: string
+    numero_disposicion?: string
+    texto_encabezado?: string
+    rubrica_disposicion?: string
+    fullText?: string        // Prioridad 1: Texto completo extraído por IA
+    texto_completo?: string  // Prioridad 2: Texto completo de la disposición
+    resumen?: string         // Prioridad 3: Resumen generado por IA (fallback)
+  }
+  dispositionType?: 'adicionales' | 'transitorias' | 'derogatorias' | 'finales'
+}
+```
+
+**Respuesta:**
+```typescript
+{
+  ok: boolean
+  fiche: string  // Texto formateado de la ficha
+  format: 'text'
+}
+```
+
+### Estructura de la Ficha de Disposición
+
+La ficha se genera en formato de texto plano con la siguiente estructura:
+
+```
+═══════════════════════════════════════════════════════════
+                  FICHA DE DISPOSICIÓN
+═══════════════════════════════════════════════════════════
+
+📄 Documento: [Nombre del documento]
+
+───────────────────────────────────────────────────────────
+
+📌 Disposición [Tipo] [número]
+
+───────────────────────────────────────────────────────────
+
+Texto de la disposición:
+
+[Texto formateado de la disposición respetando \n de la IA]
+
+───────────────────────────────────────────────────────────
+```
+
+**Características:**
+- Respeta los saltos de línea (`\n`) que vienen de la IA
+- Mantiene la indentación (espacios al inicio de las líneas)
+- **No incluye contexto jerárquico** (a diferencia de los artículos)
+- Incluye el tipo de disposición (Adicional, Transitoria, Derogatoria, Final)
+- Elimina la rúbrica del inicio del texto si coincide con el texto completo
+- Prioridad del texto: `fullText` → `texto_completo` → `resumen`
+
+**Archivo de formato:** `lib/outline/formatFicheDisposition.ts`  
+**Función:** `formatFicheDisposition(data: FicheDispositionData): string`
+
+---
+
+## e) Exportación de Fichas
+
+### Descarga de Fichas
+
+Las fichas se descargan directamente desde el frontend en dos formatos:
+
+**1. Descarga como TXT:**
+```typescript
+const blob = new Blob([fiche], { type: 'text/plain;charset=utf-8' })
+const url = URL.createObjectURL(blob)
+const a = document.createElement('a')
+a.href = url
+a.download = `Ficha_Articulo_${art.numero.replace(/\s+/g, '_')}.txt`  // Para artículos
+// o
+a.download = `Ficha_Disposicion_${tipoLabel}_${number || 'sin_numero'}.txt`  // Para disposiciones
+a.click()
+```
+
+**2. Descarga como PDF:**
+- Usa `pdf-lib` para generar el PDF
+- Convierte el texto de la ficha a formato PDF
+- Descarga como `Ficha_Articulo_{numero}.pdf` o `Ficha_Disposicion_{tipo}_{numero}.pdf`
+
+**Ubicación en código:** `app/generate/page.tsx` (componentes `ArticleDetail` y `DispositionDetail`)
+
+---
+
+## f) Límites y Validaciones
+
+### Esquema Mental
+
+| Límite | Valor | Notas |
+|--------|-------|-------|
+| **Mínimo de páginas** | 1 | Valida que `pagesFull.length > 0` |
+| **Máximo de páginas** | ❌ Sin límite | Depende de la capacidad del servidor |
+| **Tamaño de chunk** | 3, 2, 1 páginas | `MENTAL_OUTLINE_CHUNK_SIZES = [3, 2, 1]` (procesamiento adaptativo) |
+| **Timeout** | ❌ Sin límite explícito | Depende del timeout del endpoint (por defecto 120s) |
+
+### Fichas
+
+| Límite | Valor | Notas |
+|--------|-------|-------|
+| **Mínimo de texto** | 0 | Puede generar ficha sin texto (muestra "(Texto no disponible)") |
+| **Máximo de texto** | ❌ Sin límite | Depende de la capacidad del servidor/cliente |
+| **Validaciones requeridas** | `articleAnchor` / `dispositionAnchor`, `mentalOutline`, `articleData` / `dispositionData` | Todos son requeridos |
+
+---
+
+## g) Convención de Nombres de Archivo
+
+### Fichas de Artículos
+
+- **TXT:** `Ficha_Articulo_{numero}.txt`
+  - Ejemplo: `Ficha_Articulo_1.txt`, `Ficha_Articulo_5.txt`
+- **PDF:** `Ficha_Articulo_{numero}.pdf`
+  - Ejemplo: `Ficha_Articulo_1.pdf`, `Ficha_Articulo_5.pdf`
+
+**Ubicación en código:** `app/generate/page.tsx` (líneas ~553, ~793)
+
+### Fichas de Disposiciones
+
+- **TXT:** `Ficha_Disposicion_{tipo}_{numero}.txt`
+  - Ejemplo: `Ficha_Disposicion_Adicional_primera.txt`, `Ficha_Disposicion_Transitoria_1.txt`
+- **PDF:** `Ficha_Disposicion_{tipo}_{numero}.pdf`
+  - Ejemplo: `Ficha_Disposicion_Adicional_primera.pdf`, `Ficha_Disposicion_Transitoria_1.pdf`
+
+**Ubicación en código:** `app/generate/page.tsx` (líneas ~1080, ~1200+)
+
+**Nota:** Los números se normalizan reemplazando espacios por guiones bajos (`replace(/\s+/g, '_')`).
+
+---
+
+## h) Ejemplos de Estructura
+
+### Ejemplo de MentalOutline
+
+```json
+{
+  "metadata": {
+    "document_title": "Ley Orgánica 3/2018, de 5 de diciembre",
+    "source": "BOE núm. 294, de 6 de diciembre de 2018",
+    "language": "es",
+    "generated_at": "2024-01-15"
+  },
+  "front_matter": {
+    "preambulo": {
+      "present": true,
+      "anchor": "preambulo",
+      "pages": [1, 2]
+    },
+    "exposicion_motivos": {
+      "present": true,
+      "anchor": "exposicion-motivos",
+      "pages": [3, 4, 5]
+    }
+  },
+  "titulos": [
+    {
+      "codigo_titulo": "TÍTULO I",
+      "subtitulo_titulo": "Disposiciones generales",
+      "pagina_inicio_titulo": 6,
+      "pagina_fin_titulo": 50,
+      "ordinal": "I",
+      "articulos_sin_capitulo": [],
+      "capitulos": [
+        {
+          "codigo_capitulo": "CAPÍTULO I",
+          "subtitulo_capitulo": "De los derechos fundamentales",
+          "pagina_inicio_capitulo": 6,
+          "pagina_fin_capitulo": 30,
+          "ordinal": "I",
+          "articulos_sin_seccion": [
+            {
+              "numero": "1",
+              "articulo_texto": "Objeto de la Ley",
+              "pagina_articulo": 6,
+              "anchor": "art-1"
+            }
+          ],
+          "secciones": []
+        }
+      ]
+    }
+  ],
+  "disposiciones": {
+    "adicionales": [
+      {
+        "numero": "primera",
+        "texto_encabezado": "Disposición adicional primera",
+        "pagina_disposicion": 100,
+        "anchor": "disp-adicional-1"
+      }
+    ],
+    "transitorias": [],
+    "derogatorias": [],
+    "finales": []
+  }
+}
+```
+
+### Ejemplo de Ficha de Artículo
+
+```
+═══════════════════════════════════════════════════════════
+                    FICHA DE ARTÍCULO
+═══════════════════════════════════════════════════════════
+
+📄 Documento: Ley Orgánica 3/2018, de 5 de diciembre, de Protección de Datos Personales y garantía de los derechos digitales
+
+Estructura:
+  📑 TÍTULO I - Disposiciones generales
+  📖 CAPÍTULO I - De los derechos fundamentales
+
+───────────────────────────────────────────────────────────
+
+📌 Artículo 1
+
+───────────────────────────────────────────────────────────
+
+Texto del artículo:
+
+La presente Ley Orgánica tiene por objeto garantizar y proteger el tratamiento de los datos personales y los derechos fundamentales de las personas físicas en relación con dicho tratamiento.
+
+1. Esta Ley Orgánica se aplica al tratamiento de datos personales realizado por:
+   a) Los responsables y encargados del tratamiento establecidos en territorio español.
+   b) Los responsables y encargados del tratamiento no establecidos en territorio español cuando el tratamiento se relacione con la oferta de bienes o servicios a personas físicas en territorio español.
+
+2. La presente Ley Orgánica se aplicará sin perjuicio de lo establecido en la normativa específica sectorial.
+
+───────────────────────────────────────────────────────────
+```
+
+### Ejemplo de Ficha de Disposición
+
+```
+═══════════════════════════════════════════════════════════
+                  FICHA DE DISPOSICIÓN
+═══════════════════════════════════════════════════════════
+
+📄 Documento: Ley Orgánica 3/2018, de 5 de diciembre, de Protección de Datos Personales y garantía de los derechos digitales
+
+───────────────────────────────────────────────────────────
+
+📌 Disposición Adicional primera
+
+───────────────────────────────────────────────────────────
+
+Texto de la disposición:
+
+La presente Ley Orgánica entrará en vigor el día siguiente al de su publicación en el Boletín Oficial del Estado.
+
+1. Quedan derogadas todas las disposiciones de igual o inferior rango que se opongan a lo establecido en la presente Ley Orgánica.
+
+2. Se mantendrán en vigor, en tanto no se opongan a lo establecido en la presente Ley Orgánica, las disposiciones dictadas en desarrollo de la Ley Orgánica 15/1999, de 13 de diciembre, de Protección de Datos de Carácter Personal.
+
+───────────────────────────────────────────────────────────
+```
+
+---
+
+## Archivos Relacionados
+
+### Esquema Mental
+- **Tipos:** `types/mentalOutline.ts`
+- **Endpoints:** 
+  - `app/api/mental-outline/route.ts` (si existe)
+  - `app/api/mental-outline/generate-direct/route.ts`
+  - `app/api/mental-outline/generate-from-bookmarks/route.ts`
+  - `app/api/mental-outline/chunk/route.ts`
+
+### Fichas de Artículos
+- **Endpoint:** `app/api/mental-outline/generate-fiche/route.ts`
+- **Formateo:** `lib/outline/formatFiche.ts`
+- **Contexto:** `lib/outline/getArticleContext.ts`
+- **Frontend:** `app/generate/page.tsx` (componente `ArticleDetail`)
+
+### Fichas de Disposiciones
+- **Endpoint:** `app/api/mental-outline/generate-fiche-disposition/route.ts`
+- **Formateo:** `lib/outline/formatFicheDisposition.ts`
+- **Frontend:** `app/generate/page.tsx` (componente `DispositionDetail`)
+
+---
+
+## Resumen de Flujo
+
+### Esquema Mental
+1. **Generación:** Cliente → `/api/mental-outline/*` → Retorna `MentalOutline`
+2. **Métodos disponibles:** Básico, Directo (desde índice), Bookmarks (desde PDF), Chunks (incremental)
+
+### Fichas
+1. **Extracción:** Cliente → `/api/mental-outline/extract-article-ai` o `/api/mental-outline/extract-disposition-ai` → Extrae texto completo
+2. **Generación:** Cliente → `/api/mental-outline/generate-fiche` o `/api/mental-outline/generate-fiche-disposition` → Retorna ficha formateada
+3. **Descarga:** Cliente descarga directamente como TXT o PDF desde el frontend
 
 
 

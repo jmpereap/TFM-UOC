@@ -407,24 +407,5 @@ async function extractBookmarksWithPdf2json(buffer: Buffer, Pdf2json: any): Prom
   })
 }
 
-/**
- * Aplana la estructura jerárquica de bookmarks a una lista plana
- * Útil para mostrar todos los bookmarks en una lista
- */
-export function flattenBookmarks(bookmarks: BookmarkItem[]): BookmarkItem[] {
-  const result: BookmarkItem[] = []
-
-  function traverse(items: BookmarkItem[], level: number = 0) {
-    for (const item of items) {
-      result.push({ ...item, level } as BookmarkItem)
-      if (item.children && item.children.length > 0) {
-        traverse(item.children, level + 1)
-      }
-    }
-  }
-
-  traverse(bookmarks)
-  return result
-}
 
 

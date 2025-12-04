@@ -1,0 +1,17 @@
+warning: in the working copy of '.env.example', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'PLAN-MEJORA-NIVEL-PREGUNTAS.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'README.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'app/api/mental-outline/chunk/route.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'app/api/mental-outline/extract-article/route.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'app/api/mental-outline/generate-direct/route.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'app/api/mental-outline/generate-fiche/route.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'app/api/outline/route.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'app/api/summarize/route.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'app/generate/page.tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'components/DragDropUpload.tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'hooks/useLocalStorage.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'lib/outline/formatFiche.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'lib/pdf/extractBookmarks.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'lib/qa/promptsSummary.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'lib/utils/fastSummary.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'lib/utils/legalSegment.ts', LF will be replaced by CRLF the next time Git touches it

@@ -212,8 +212,27 @@ export async function POST(req: Request) {
 
     if (deduped.length === 0) {
       const dt = Date.now() - t0
-      logEvent('generate.empty', { reqId, latencyMs: dt, requested: n })
-      return NextResponse.json({ ok: false, error: 'Sin preguntas generadas' }, { status: 502 })
+      const blocksProcessed = parts.length
+      const totalItemsFromBlocks = allItems.length
+      const blocksWithItems = parts.filter(p => p.length > 0).length
+      logEvent('generate.empty', { 
+        reqId, 
+        latencyMs: dt, 
+        requested: n,
+        blocksProcessed,
+        totalItemsFromBlocks,
+        blocksWithItems,
+        blocksEmpty: blocksProcessed - blocksWithItems,
+      })
+      return NextResponse.json({ 
+        ok: false, 
+        error: 'No se pudieron generar preguntas. El modelo devolvió respuestas vacías. Esto puede ocurrir si el texto es demasiado corto o no contiene suficiente contenido para generar preguntas.',
+        details: {
+          blocksProcessed,
+          blocksWithItems,
+          blocksEmpty: blocksProcessed - blocksWithItems,
+        }
+      }, { status: 502 })
     }
 
     const dt = Date.now() - t0

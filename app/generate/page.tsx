@@ -968,9 +968,6 @@ function DispositionDetail({
     <div className="rounded-xl border-2 border-slate-200 bg-gradient-to-br from-white to-slate-50/30 p-5 shadow-lg">
       <div className="mb-5 pb-4 border-b-2 border-slate-200">
         <div className="flex items-start gap-3">
-          <div className="flex-shrink-0 w-12 h-12 rounded-lg bg-slate-100 flex items-center justify-center">
-            <span className="text-slate-800 font-bold text-lg">{number || '—'}</span>
-          </div>
           <div className="flex-1 min-w-0">
             <h3 className="text-xl font-bold text-slate-900 mb-1">
               {displayTitle}
@@ -1102,8 +1099,8 @@ function DispositionDetail({
                       const boldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold)
                       
                       // Título
-                      const title = `Disposición ${tipoLabel} ${number || '(sin número)'}`
-                      const rubrica = heading && heading !== `Disposición ${tipoLabel} ${number}` ? heading.replace(/^Disposici[óo]n\s+(Adicional|Transitoria|Derogatoria|Final)\s*[\wáéíóúüñºª]*\.?\s*/i, '') : ''
+                      const title = displayTitle
+                      const rubrica = disposicion.texto_encabezado && disposicion.texto_encabezado !== displayTitle ? disposicion.texto_encabezado.replace(/^Disposici[óo]n\s+(Adicional|Transitoria|Derogatoria|Final)\s*[\wáéíóúüñºª]*\.?\s*/i, '') : ''
                       const resumenFormateado = formatResumen(resumen)
                       
                       let y = 800
@@ -2193,7 +2190,29 @@ export default function GeneratePage() {
         body: JSON.stringify(requestBody),
       })
       const data = await res.json()
-      if (!data.ok) throw new Error(data.error || 'Fallo en /api/generate')
+
+      if (!res.ok || !data.ok) {
+        const backendMessage: string = data?.error || ''
+
+        // Caso específico: el backend devuelve 502 porque el modelo no genera ninguna pregunta
+        // (PDF/texto demasiado pequeño o sin suficiente contenido para el número de preguntas solicitado)
+        if (
+          res.status === 502 &&
+          (backendMessage.includes('No se pudieron generar preguntas') ||
+            backendMessage.includes('Sin preguntas generadas') ||
+            backendMessage.includes('modelo devolvió respuestas vacías'))
+        ) {
+          throw new Error(
+            'El PDF es demasiado pequeño para generar el número de preguntas solicitado. Intenta con un número menor.',
+          )
+        }
+
+        // Resto de errores: mostrar mensaje que venga del backend o uno genérico
+        const genericMessage =
+          backendMessage || `Error ${res.status || ''} en /api/generate`.trim()
+        throw new Error(genericMessage)
+      }
+
       setItems(data.items as MCQItem[])
     } catch (e: any) {
       setGenError(e?.message || 'Error generando preguntas.')
@@ -2988,6 +3007,11 @@ export default function GeneratePage() {
                   </button>
                 </form>
                 <span className="mt-1 text-[11px] text-slate-500">Rango {MIN_Q}–{MAX_Q}</span>
+                {genError && (
+                  <div className="mt-2 px-3 py-2 rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm">
+                    {genError}
+                  </div>
+                )}
                 <div className="mt-3 flex flex-col gap-1">
                   <div className="flex items-center gap-1.5 relative" ref={difficultyTooltipRef}>
                     <label className="text-xs font-medium text-slate-700">Dificultad preguntas</label>

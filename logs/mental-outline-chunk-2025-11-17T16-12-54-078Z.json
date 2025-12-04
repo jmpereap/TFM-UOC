@@ -1,0 +1,562 @@
+{
+  "timestamp": "2025-11-17T16:12:54.079Z",
+  "source": "BOE-A-2018-16673-consolidado-páginas-TituloI-III-copia",
+  "pagesRange": [
+    1,
+    3
+  ],
+  "schemaPrev": null,
+  "schemaAcumuladoRaw": {
+    "metadata": {
+      "document_title": "BOE-A-2018-16673-consolidado-páginas-TituloI-III-copia",
+      "source": "BOE-A-2018-16673-consolidado-páginas-TituloI-III-copia",
+      "language": "es",
+      "generated_at": "2025-11-17"
+    },
+    "front_matter": {
+      "preambulo": {
+        "present": true,
+        "anchor": null,
+        "pages": [
+          8
+        ]
+      },
+      "exposicion_motivos": {
+        "present": false,
+        "anchor": null,
+        "pages": null
+      }
+    },
+    "titulos": [
+      {
+        "codigo_titulo": "TÍTULO I",
+        "subtitulo_titulo": "Disposiciones generales",
+        "pagina_inicio_titulo": 15,
+        "pagina_fin_titulo": 16,
+        "articulos_sin_capitulo": [
+          {
+            "numero_articulo": "Artículo 1",
+            "rubrica_articulo": "Objeto de la ley",
+            "pagina_inicio_articulo": 15,
+            "pagina_fin_articulo": 15
+          },
+          {
+            "numero_articulo": "Artículo 2",
+            "rubrica_articulo": "Ámbito de aplicación de los Títulos I a IX y de los artículos 89 a 94",
+            "pagina_inicio_articulo": 15,
+            "pagina_fin_articulo": 15
+          },
+          {
+            "numero_articulo": "Artículo 3",
+            "rubrica_articulo": "Datos de las personas fallecidas",
+            "pagina_inicio_articulo": 15,
+            "pagina_fin_articulo": 15
+          }
+        ],
+        "capitulos": []
+      },
+      {
+        "codigo_titulo": "TÍTULO II",
+        "subtitulo_titulo": "Principios de protección de datos",
+        "pagina_inicio_titulo": 16,
+        "pagina_fin_titulo": 18,
+        "articulos_sin_capitulo": [
+          {
+            "numero_articulo": "Artículo 4",
+            "rubrica_articulo": "Exactitud de los datos",
+            "pagina_inicio_articulo": 16,
+            "pagina_fin_articulo": 16
+          },
+          {
+            "numero_articulo": "Artículo 5",
+            "rubrica_articulo": "Deber de confidencialidad",
+            "pagina_inicio_articulo": 16,
+            "pagina_fin_articulo": 16
+          },
+          {
+            "numero_articulo": "Artículo 6",
+            "rubrica_articulo": "Tratamiento basado en el consentimiento del afectado",
+            "pagina_inicio_articulo": 16,
+            "pagina_fin_articulo": 16
+          },
+          {
+            "numero_articulo": "Artículo 7",
+            "rubrica_articulo": "Consentimiento de los menores de edad",
+            "pagina_inicio_articulo": 17,
+            "pagina_fin_articulo": 17
+          },
+          {
+            "numero_articulo": "Artículo 8",
+            "rubrica_articulo": "Tratamiento de datos por obligación legal, interés público o ejercicio de poderes públicos",
+            "pagina_inicio_articulo": 17,
+            "pagina_fin_articulo": 17
+          },
+          {
+            "numero_articulo": "Artículo 9",
+            "rubrica_articulo": "Categorías especiales de datos",
+            "pagina_inicio_articulo": 17,
+            "pagina_fin_articulo": 17
+          },
+          {
+            "numero_articulo": "Artículo 10",
+            "rubrica_articulo": "Tratamiento de datos de naturaleza penal",
+            "pagina_inicio_articulo": 17,
+            "pagina_fin_articulo": 17
+          }
+        ],
+        "capitulos": []
+      },
+      {
+        "codigo_titulo": "TÍTULO III",
+        "subtitulo_titulo": "Derechos de las personas",
+        "pagina_inicio_titulo": 18,
+        "pagina_fin_titulo": 20,
+        "articulos_sin_capitulo": [],
+        "capitulos": [
+          {
+            "codigo_capitulo": "CAPÍTULO I",
+            "subtitulo_capitulo": "Transparencia e información",
+            "pagina_inicio_capitulo": 18,
+            "pagina_fin_capitulo": 18,
+            "articulos_sin_seccion": [
+              {
+                "numero_articulo": "Artículo 11",
+                "rubrica_articulo": "Transparencia e información al afectado",
+                "pagina_inicio_articulo": 18,
+                "pagina_fin_articulo": 18
+              }
+            ],
+            "secciones": []
+          },
+          {
+            "codigo_capitulo": "CAPÍTULO II",
+            "subtitulo_capitulo": "Ejercicio de los derechos",
+            "pagina_inicio_capitulo": 18,
+            "pagina_fin_capitulo": 18,
+            "articulos_sin_seccion": [
+              {
+                "numero_articulo": "Artículo 12",
+                "rubrica_articulo": "Disposiciones generales sobre ejercicio de los derechos",
+                "pagina_inicio_articulo": 18,
+                "pagina_fin_articulo": 18
+              }
+            ],
+            "secciones": []
+          }
+        ]
+      }
+    ],
+    "disposiciones": {
+      "adicionales": [],
+      "transitorias": [],
+      "derogatorias": [],
+      "finales": []
+    }
+  },
+  "schemaAcumuladoSanitized": {
+    "metadata": {
+      "document_title": "BOE-A-2018-16673-consolidado-páginas-TituloI-III-copia",
+      "source": "BOE-A-2018-16673-consolidado-páginas-TituloI-III-copia",
+      "language": "es",
+      "generated_at": "2025-11-17"
+    },
+    "front_matter": {
+      "preambulo": {
+        "present": true,
+        "anchor": null,
+        "pages": [
+          8
+        ]
+      },
+      "exposicion_motivos": {
+        "present": false,
+        "anchor": null,
+        "pages": null
+      }
+    },
+    "titulos": [
+      {
+        "ordinal": "I",
+        "titulo_texto": "Disposiciones generales",
+        "pagina_inicio_titulo": 15,
+        "pagina_fin_titulo": 16,
+        "pages": [
+          15
+        ],
+        "anchor": "tit-i",
+        "articulos": [
+          {
+            "numero": "Artículo 1",
+            "articulo_texto": "Objeto de la ley",
+            "pagina_articulo": 15,
+            "pages": [
+              15
+            ],
+            "anchor": "art-1"
+          },
+          {
+            "numero": "Artículo 2",
+            "articulo_texto": "Ámbito de aplicación de los Títulos I a IX y de los artículos 89 a 94",
+            "pagina_articulo": 15,
+            "pages": [
+              15
+            ],
+            "anchor": "art-2"
+          },
+          {
+            "numero": "Artículo 3",
+            "articulo_texto": "Datos de las personas fallecidas",
+            "pagina_articulo": 15,
+            "pages": [
+              15
+            ],
+            "anchor": "art-3"
+          }
+        ],
+        "capitulos": []
+      },
+      {
+        "ordinal": "II",
+        "titulo_texto": "Principios de protección de datos",
+        "pagina_inicio_titulo": 16,
+        "pagina_fin_titulo": 18,
+        "pages": [
+          16
+        ],
+        "anchor": "tit-ii",
+        "articulos": [
+          {
+            "numero": "Artículo 4",
+            "articulo_texto": "Exactitud de los datos",
+            "pagina_articulo": 16,
+            "pages": [
+              16
+            ],
+            "anchor": "art-4"
+          },
+          {
+            "numero": "Artículo 5",
+            "articulo_texto": "Deber de confidencialidad",
+            "pagina_articulo": 16,
+            "pages": [
+              16
+            ],
+            "anchor": "art-5"
+          },
+          {
+            "numero": "Artículo 6",
+            "articulo_texto": "Tratamiento basado en el consentimiento del afectado",
+            "pagina_articulo": 16,
+            "pages": [
+              16
+            ],
+            "anchor": "art-6"
+          },
+          {
+            "numero": "Artículo 7",
+            "articulo_texto": "Consentimiento de los menores de edad",
+            "pagina_articulo": 17,
+            "pages": [
+              17
+            ],
+            "anchor": "art-7"
+          },
+          {
+            "numero": "Artículo 8",
+            "articulo_texto": "Tratamiento de datos por obligación legal, interés público o ejercicio de poderes públicos",
+            "pagina_articulo": 17,
+            "pages": [
+              17
+            ],
+            "anchor": "art-8"
+          },
+          {
+            "numero": "Artículo 9",
+            "articulo_texto": "Categorías especiales de datos",
+            "pagina_articulo": 17,
+            "pages": [
+              17
+            ],
+            "anchor": "art-9"
+          },
+          {
+            "numero": "Artículo 10",
+            "articulo_texto": "Tratamiento de datos de naturaleza penal",
+            "pagina_articulo": 17,
+            "pages": [
+              17
+            ],
+            "anchor": "art-10"
+          }
+        ],
+        "capitulos": []
+      },
+      {
+        "ordinal": "III",
+        "titulo_texto": "Derechos de las personas",
+        "pagina_inicio_titulo": 18,
+        "pagina_fin_titulo": 20,
+        "pages": [
+          18
+        ],
+        "anchor": "tit-iii",
+        "articulos": [],
+        "capitulos": [
+          {
+            "ordinal": "I",
+            "capitulo_texto": "Transparencia e información",
+            "pagina_inicio_capitulo": 18,
+            "pagina_fin_capitulo": 18,
+            "pages": [
+              18
+            ],
+            "anchor": "cap-i",
+            "articulos": [
+              {
+                "numero": "Artículo 11",
+                "articulo_texto": "Transparencia e información al afectado",
+                "pagina_articulo": 18,
+                "pages": [
+                  18
+                ],
+                "anchor": "art-11"
+              }
+            ],
+            "secciones": []
+          },
+          {
+            "ordinal": "II",
+            "capitulo_texto": "Ejercicio de los derechos",
+            "pagina_inicio_capitulo": 18,
+            "pagina_fin_capitulo": 18,
+            "pages": [
+              18
+            ],
+            "anchor": "cap-ii",
+            "articulos": [
+              {
+                "numero": "Artículo 12",
+                "articulo_texto": "Disposiciones generales sobre ejercicio de los derechos",
+                "pagina_articulo": 18,
+                "pages": [
+                  18
+                ],
+                "anchor": "art-12"
+              }
+            ],
+            "secciones": []
+          }
+        ]
+      }
+    ],
+    "disposiciones": {
+      "adicionales": [],
+      "transitorias": [],
+      "derogatorias": [],
+      "finales": []
+    }
+  },
+  "mergedOutline": {
+    "metadata": {
+      "document_title": "BOE-A-2018-16673-consolidado-páginas-TituloI-III-copia",
+      "source": "BOE-A-2018-16673-consolidado-páginas-TituloI-III-copia",
+      "language": "es",
+      "generated_at": "2025-11-17"
+    },
+    "front_matter": {
+      "preambulo": {
+        "present": true,
+        "anchor": null,
+        "pages": [
+          8
+        ]
+      },
+      "exposicion_motivos": {
+        "present": false,
+        "anchor": null,
+        "pages": null
+      }
+    },
+    "titulos": [
+      {
+        "ordinal": "I",
+        "titulo_texto": "Disposiciones generales",
+        "pagina_inicio_titulo": 15,
+        "pagina_fin_titulo": 16,
+        "pages": [
+          15
+        ],
+        "anchor": "tit-i",
+        "articulos": [
+          {
+            "numero": "Artículo 1",
+            "articulo_texto": "Objeto de la ley",
+            "pagina_articulo": 15,
+            "pages": [
+              15
+            ],
+            "anchor": "art-1"
+          },
+          {
+            "numero": "Artículo 2",
+            "articulo_texto": "Ámbito de aplicación de los Títulos I a IX y de los artículos 89 a 94",
+            "pagina_articulo": 15,
+            "pages": [
+              15
+            ],
+            "anchor": "art-2"
+          },
+          {
+            "numero": "Artículo 3",
+            "articulo_texto": "Datos de las personas fallecidas",
+            "pagina_articulo": 15,
+            "pages": [
+              15
+            ],
+            "anchor": "art-3"
+          }
+        ],
+        "capitulos": []
+      },
+      {
+        "ordinal": "II",
+        "titulo_texto": "Principios de protección de datos",
+        "pagina_inicio_titulo": 16,
+        "pagina_fin_titulo": 18,
+        "pages": [
+          16
+        ],
+        "anchor": "tit-ii",
+        "articulos": [
+          {
+            "numero": "Artículo 4",
+            "articulo_texto": "Exactitud de los datos",
+            "pagina_articulo": 16,
+            "pages": [
+              16
+            ],
+            "anchor": "art-4"
+          },
+          {
+            "numero": "Artículo 5",
+            "articulo_texto": "Deber de confidencialidad",
+            "pagina_articulo": 16,
+            "pages": [
+              16
+            ],
+            "anchor": "art-5"
+          },
+          {
+            "numero": "Artículo 6",
+            "articulo_texto": "Tratamiento basado en el consentimiento del afectado",
+            "pagina_articulo": 16,
+            "pages": [
+              16
+            ],
+            "anchor": "art-6"
+          },
+          {
+            "numero": "Artículo 7",
+            "articulo_texto": "Consentimiento de los menores de edad",
+            "pagina_articulo": 17,
+            "pages": [
+              17
+            ],
+            "anchor": "art-7"
+          },
+          {
+            "numero": "Artículo 8",
+            "articulo_texto": "Tratamiento de datos por obligación legal, interés público o ejercicio de poderes públicos",
+            "pagina_articulo": 17,
+            "pages": [
+              17
+            ],
+            "anchor": "art-8"
+          },
+          {
+            "numero": "Artículo 9",
+            "articulo_texto": "Categorías especiales de datos",
+            "pagina_articulo": 17,
+            "pages": [
+              17
+            ],
+            "anchor": "art-9"
+          },
+          {
+            "numero": "Artículo 10",
+            "articulo_texto": "Tratamiento de datos de naturaleza penal",
+            "pagina_articulo": 17,
+            "pages": [
+              17
+            ],
+            "anchor": "art-10"
+          }
+        ],
+        "capitulos": []
+      },
+      {
+        "ordinal": "III",
+        "titulo_texto": "Derechos de las personas",
+        "pagina_inicio_titulo": 18,
+        "pagina_fin_titulo": 20,
+        "pages": [
+          18
+        ],
+        "anchor": "tit-iii",
+        "articulos": [],
+        "capitulos": [
+          {
+            "ordinal": "I",
+            "capitulo_texto": "Transparencia e información",
+            "pagina_inicio_capitulo": 18,
+            "pagina_fin_capitulo": 18,
+            "pages": [
+              18
+            ],
+            "anchor": "cap-i",
+            "articulos": [
+              {
+                "numero": "Artículo 11",
+                "articulo_texto": "Transparencia e información al afectado",
+                "pagina_articulo": 18,
+                "pages": [
+                  18
+                ],
+                "anchor": "art-11"
+              }
+            ],
+            "secciones": []
+          },
+          {
+            "ordinal": "II",
+            "capitulo_texto": "Ejercicio de los derechos",
+            "pagina_inicio_capitulo": 18,
+            "pagina_fin_capitulo": 18,
+            "pages": [
+              18
+            ],
+            "anchor": "cap-ii",
+            "articulos": [
+              {
+                "numero": "Artículo 12",
+                "articulo_texto": "Disposiciones generales sobre ejercicio de los derechos",
+                "pagina_articulo": 18,
+                "pages": [
+                  18
+                ],
+                "anchor": "art-12"
+              }
+            ],
+            "secciones": []
+          }
+        ]
+      }
+    ],
+    "disposiciones": {
+      "adicionales": [],
+      "transitorias": [],
+      "derogatorias": [],
+      "finales": []
+    }
+  }
+}

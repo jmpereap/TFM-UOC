@@ -101,6 +101,17 @@ export async function callModel(prompt: string, timeoutMs = 30000): Promise<MCQI
     )
     const txt = res.choices[0]?.message?.content || '[]'
     const arr = extractJsonArray(txt)
+    
+    // Log la respuesta del modelo si está vacía para diagnóstico
+    if (arr.length === 0) {
+      logEvent('model.empty_response', {
+        responseText: txt.slice(0, 500), // Primeros 500 caracteres para diagnóstico
+        responseLength: txt.length,
+        promptLength: prompt.length,
+        promptPreview: prompt.slice(0, 200), // Primeros 200 caracteres del prompt
+      })
+    }
+    
     // Función para normalizar y validar difficulty
     const normalizeDifficulty = (difficulty: any): 'basico' | 'medio' | 'avanzado' => {
       const d = String(difficulty || '').toLowerCase().trim()
@@ -134,6 +145,7 @@ export async function callModel(prompt: string, timeoutMs = 30000): Promise<MCQI
       durationMs: duration,
       itemsCount: items.length,
       promptLength: prompt.length,
+      responseLength: txt.length,
     })
     return items
   } catch (err) {
