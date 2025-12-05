@@ -1,22 +1,24 @@
-export function unitScore(u: any) {
+import type { LegalUnit } from '@/lib/utils/legalSegment'
+
+export function unitScore(u: LegalUnit) {
   const t = (u.text || '').toLowerCase()
   let s = 0
   s += ((t.match(/art[íi]culo\s+\d+/g) || []).length) * 2
-  if (/t[íi]tulo\s+iv\b/.test(t)) s += 8
-  if (/t[íi]tulo\s+ii\b/.test(t)) s += 6
-  if (/t[íi]tulo\s+i\b/.test(t)) s += 5
-  if (/t[íi]tulo\s+vi\b/.test(t)) s += 4
+  if (/titulo\s+iv\b/.test(t)) s += 8
+  if (/titulo\s+ii\b/.test(t)) s += 6
+  if (/titulo\s+i\b/.test(t)) s += 5
+  if (/titulo\s+vi\b/.test(t)) s += 4
   if (/disposici[óo]n\s+(adicional|transitoria|derogatoria|final)/.test(t)) s += 5
   s += Math.min(10, Math.floor(((u.text || '').length / 2000)))
   return s
 }
 
-export function extractiveSlice(text: string, maxChars = 1500) {
+export function extractiveSlice(text: string, maxChars = 1800) {
   if (!text) return ''
   const parts = text.split(/\n{2,}/)
   let out = ''
-  for (const p of parts) {
-    const sent = p.split(/(?<=[\.!?])\s+(?=[A-ZÁÉÍÓÚÑ])/)[0] || p
+  for (const par of parts) {
+    const sent = par.split(/(?<=[\.!?])\s+(?=[A-ZÁÉÍÓÚÑ])/)[0] || par
     if ((out + '\n' + sent).length > maxChars) break
     out += (out ? '\n' : '') + sent
   }
@@ -27,7 +29,7 @@ export function pickFastUnits(units: any[], K: number) {
   return [...units].sort((a, b) => unitScore(b) - unitScore(a)).slice(0, K)
 }
 
-export function titleBucket(u: { unidad: string }) {
+export function titleBucket(u: LegalUnit) {
   const t = (u.unidad || '').toLowerCase()
   if (/titulo\s+iv\b/.test(t)) return 'T4'
   if (/titulo\s+ii\b/.test(t)) return 'T2'
@@ -37,14 +39,14 @@ export function titleBucket(u: { unidad: string }) {
   return 'OTROS'
 }
 
-export function pickStratified(units: any[], K = 12) {
-  const g = new Map<string, any[]>()
+export function pickStratified(units: LegalUnit[], K = 12) {
+  const groups = new Map<string, LegalUnit[]>()
   for (const u of units) {
     const b = titleBucket(u)
-    if (!g.has(b)) g.set(b, [])
-    g.get(b)!.push(u)
+    if (!groups.has(b)) groups.set(b, [])
+    groups.get(b)!.push(u)
   }
-  for (const arr of g.values()) arr.sort((a, b) => (b.text?.length || 0) - (a.text?.length || 0))
+  for (const arr of groups.values()) arr.sort((a, b) => b.text.length - a.text.length)
   const plan: Array<[string, number]> = [
     ['T4', 3],
     ['T2', 2],
@@ -53,11 +55,11 @@ export function pickStratified(units: any[], K = 12) {
     ['DISP', 2],
     ['OTROS', K],
   ]
-  const pick: any[] = []
-  for (const [key, q] of plan) {
-    const arr = g.get(key) || []
-    while (pick.length < K && arr.length && (key !== 'OTROS' ? pick.filter((x) => titleBucket(x) === key).length < q : true)) {
-      pick.push(arr.shift())
+  const pick: LegalUnit[] = []
+  for (const [key, quota] of plan) {
+    const arr = groups.get(key) || []
+    while (pick.length < K && arr.length && (key !== 'OTROS' ? pick.filter((x) => titleBucket(x) === key).length < quota : true)) {
+      pick.push(arr.shift()!)
     }
     if (pick.length >= K) break
   }

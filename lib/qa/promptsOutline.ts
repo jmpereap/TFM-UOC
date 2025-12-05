@@ -1,22 +1,26 @@
-type Snippet = {
+type OutlineSnippet = {
   unidad: string
   rango: string
   texto: string
-  articulos?: Array<{ articulo: string; resumen: string }>
 }
 
-export function buildOutlinePrompt({ lawName, snippets }: { lawName: string; snippets: Snippet[] }) {
+export function buildOutlinePrompt({ lawName, snippets }: { lawName: string; snippets: OutlineSnippet[] }) {
   const body = JSON.stringify(snippets).slice(0, 20000)
   return `SYSTEM: Responde SOLO con un objeto JSON válido.
 USER:
-Construye un ESQUEMA JERÁRQUICO (mapa mental) de: ${lawName}. Usa SOLO la info de los fragmentos.
-Niveles: root -> TÍTULOS -> CAPÍTULOS/SECCIONES -> CONCEPTOS o ARTÍCULOS.
-Salida base: {"root":{"id":"root","label":"${lawName}","kind":"root","children":[{"id":"titulo-preliminar","label":"TÍTULO PRELIMINAR","kind":"titulo","pages":"p.i–j","children":[{"id":"cap-i","label":"Capítulo I","kind":"capitulo","children":[{"id":"concepto-1","label":"Fundamento","kind":"concepto","articulos":["Art. 1"]}]}]}]}}
-Reglas mínimas:
-- Incluir Títulos I–X y Disposiciones si aparecen; cada Título con ≥1 hijo.
-- Al menos 12 nodos hoja (concepto/artículo); cada hoja ≤90 caracteres, resume idea clave y referencia articular.
-- Usa el campo "articulos" de los fragmentos para crear nodos Artículo cuando sea pertinente.
-Fragmentos: ${body}`
+Construye un ESQUEMA (mapa mental) jerárquico de: ${lawName}.
+Usa EXCLUSIVAMENTE la información de los fragmentos.
+Mínimos: ≥6 nodos TÍTULO/Disposición y ≥10 hojas; cada TÍTULO con ≥1 hijo; labels ≤90 caracteres.
+Fragmentos: ${body}
+Salida JSON exacta con forma { "root": { "id":"root","label":"${lawName}","kind":"root","children":[{ "id":"titulo-i","label":"TÍTULO I …","kind":"titulo","pages":"p.X–Y","children":[{ "id":"cap-i","label":"Capítulo I …","kind":"capitulo","children":[{ "id":"art-1","label":"Fundamento (Art. 1)","kind":"articulo"}]}]}] } }`
 }
+
+
+
+
+
+
+
+
 
 

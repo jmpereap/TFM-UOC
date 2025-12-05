@@ -4,3 +4,13 @@
 - 0002: Endpoints de demo (`/api/upload`, `/api/generate`) para flujo E2E básico.
 
 
+
+
+
+
+
+
+
+
+
+

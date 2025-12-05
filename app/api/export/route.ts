@@ -9,6 +9,7 @@ function stripCorrect(items: MCQItem[]): Omit<MCQItem, 'correcta'>[] {
     pregunta: it.pregunta,
     opciones: it.opciones,
     justificacion: it.justificacion,
+    difficulty: it.difficulty,
     referencia: it.referencia,
   }))
 }
@@ -139,7 +140,7 @@ export async function POST(req: NextRequest) {
     })
   }
 
-  const pdfBytes = await itemsToPDF(items as MCQItem[], lawName)
+  const pdfBytes = Buffer.from(await itemsToPDF(items as MCQItem[], lawName))
   return new NextResponse(pdfBytes, {
     status: 200,
     headers: {

@@ -8,6 +8,7 @@ export type PageStats = {
   chars: number
   lines: number
   idxLines: number
+  idxMatches: number
   upperHits: number
   hasArticulo: boolean
   hasTitulo: boolean

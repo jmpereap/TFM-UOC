@@ -1,0 +1,5 @@
+{
+  "/api/upload/route": "app/api/upload/route.js",
+  "/generate/page": "app/generate/page.js",
+  "/api/mental-outline/chunk/route": "app/api/mental-outline/chunk/route.js"
+}

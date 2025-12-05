@@ -11,3 +11,13 @@ export function smartTruncateLegal(text: string, maxChars = 2800) {
 }
 
 
+
+
+
+
+
+
+
+
+
+
