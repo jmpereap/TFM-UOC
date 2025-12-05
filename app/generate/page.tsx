@@ -271,7 +271,18 @@ function ArticleDetail({ art, idx, pagesFull, pagesFullRaw, frontMatterDropped, 
     loadArticleSummary()
     // Limpiar la ficha cuando cambia el artículo
     setFiche(null)
-  }, [art.anchor, lawName, mentalOutline])
+  }, [
+    art.anchor,
+    art.numero,
+    art.articulo_texto,
+    art.pages,
+    art.pagina_articulo,
+    lawName,
+    mentalOutline,
+    pagesFull,
+    pagesFullRaw,
+    sourceFromBookmarks,
+  ])
 
   const number = normalizeArticleNumber(art.numero, art.articulo_texto, idx)
   const heading = normalizeArticleHeading(art.articulo_texto, number)
@@ -505,7 +516,7 @@ function ArticleDetail({ art, idx, pagesFull, pagesFullRaw, frontMatterDropped, 
                       
                       // Guardar PDF
                       const pdfBytes = await pdfDoc.save()
-                      const blob = new Blob([pdfBytes], { type: 'application/pdf' })
+                      const blob = new Blob([new Uint8Array(pdfBytes)], { type: 'application/pdf' })
                       const url = URL.createObjectURL(blob)
                       const a = document.createElement('a')
                       a.href = url
@@ -786,7 +797,7 @@ function ArticleDetail({ art, idx, pagesFull, pagesFullRaw, frontMatterDropped, 
                       
                       // Guardar PDF
                       const pdfBytes = await pdfDoc.save()
-                      const blob = new Blob([pdfBytes], { type: 'application/pdf' })
+                      const blob = new Blob([new Uint8Array(pdfBytes)], { type: 'application/pdf' })
                       const url = URL.createObjectURL(blob)
                       const a = document.createElement('a')
                       a.href = url
@@ -947,7 +958,17 @@ function DispositionDetail({
     }
 
     loadDispositionSummary()
-  }, [disposicion.anchor, tipo, lawName, mentalOutline, pagesFull, pagesFullRaw, sourceFromBookmarks])
+  }, [
+    disposicion.anchor,
+    disposicion.numero,
+    disposicion.pagina_disposicion,
+    tipo,
+    lawName,
+    mentalOutline,
+    pagesFull,
+    pagesFullRaw,
+    sourceFromBookmarks,
+  ])
 
   const number = normalizeDispositionNumber(disposicion, idx)
   const tipoLabel =
@@ -1904,7 +1925,7 @@ export default function GeneratePage() {
       setLawName('')
       setUserEditedLawName(false)
     }
-  }, [isOutlineOnlyView]) // Solo al montar el componente y cuando cambia isOutlineOnlyView
+  }, [isOutlineOnlyView, setLawName, setUserEditedLawName]) // Solo al montar el componente y cuando cambia isOutlineOnlyView
 
   // Paginación
   const PAGE_SIZE = 5
@@ -1919,7 +1940,10 @@ export default function GeneratePage() {
   const totalPagesFiltered = Math.max(1, Math.ceil(filteredItems.length / PAGE_SIZE))
   const pageStartFiltered = (page - 1) * PAGE_SIZE
   const pageEndFiltered = Math.min(filteredItems.length, page * PAGE_SIZE)
-  const pageItems = useMemo(() => filteredItems.slice(pageStartFiltered, pageEndFiltered), [filteredItems, page, pageStartFiltered, pageEndFiltered])
+  const pageItems = useMemo(
+    () => filteredItems.slice(pageStartFiltered, pageEndFiltered),
+    [filteredItems, pageStartFiltered, pageEndFiltered]
+  )
   
   // Ajustar página si está fuera de rango después de filtrar
   useEffect(() => {
@@ -1950,7 +1974,7 @@ export default function GeneratePage() {
         // Ignorar errores de localStorage
       }
     }
-  }, [mentalOutline, mentalOutlineSource, pagesFull, pagesFullRaw, frontMatterDropped, pagesCount])
+  }, [mentalOutline, mentalOutlineSource, pagesFull, pagesFullRaw, frontMatterDropped, pagesCount, lawName])
 
   // Cargar esquema desde localStorage si estamos en modo "solo esquema"
   useEffect(() => {
@@ -3132,8 +3156,9 @@ export default function GeneratePage() {
                           return count
                         }
                         const totalBookmarks = bookmarks.length > 0 ? countAllBookmarks(bookmarks) : 0
-                        const bookmarksAvailable = pagesCount && totalBookmarks > pagesCount
-                        return bookmarksAvailable // Bloquear si bookmarks están disponibles
+                        const bookmarksAvailable =
+                          typeof pagesCount === 'number' ? totalBookmarks > pagesCount : totalBookmarks > 0
+                        return !!bookmarksAvailable // Bloquear si bookmarks están disponibles
                       })()}
                       className="h-9 px-3 rounded-lg bg-green-600 text-white text-sm disabled:opacity-50"
                       title={(() => {
@@ -3148,7 +3173,8 @@ export default function GeneratePage() {
                           return count
                         }
                         const totalBookmarks = bookmarks.length > 0 ? countAllBookmarks(bookmarks) : 0
-                        const bookmarksAvailable = pagesCount && totalBookmarks > pagesCount
+                        const bookmarksAvailable =
+                          typeof pagesCount === 'number' ? totalBookmarks > pagesCount : totalBookmarks > 0
                         if (bookmarksAvailable) {
                           return 'Usa "Desde Bookmarks" para generar el esquema cuando hay bookmarks disponibles'
                         }
@@ -3316,9 +3342,9 @@ export default function GeneratePage() {
             >
               Corregir todo
             </button>
-            <label className="flex items-center gap-2 text-xs md:text-sm">
+              <label className="flex items-center gap-2 text-xs md:text-sm">
               <input type="checkbox" checked={includeCorrect} onChange={(e) => setIncludeCorrect(e.target.checked)} />
-              Incluir columna "correcta" en la exportación
+              Incluir columna &quot;correcta&quot; en la exportación
             </label>
             
             {/* Filtros por dificultad */}
