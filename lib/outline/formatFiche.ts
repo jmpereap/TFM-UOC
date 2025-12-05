@@ -39,12 +39,12 @@ function formatArticleText(text: string): string[] {
   // IMPORTANTE: Solo detectar si está al inicio de un párrafo, no cuando es parte de una referencia
   // Ejemplo: "artículo 3." NO debe marcar inicio de párrafo, pero "3. Texto" SÍ debe
   const apartadoPattern = /\b(\d+)\.\s+/g
-  const matches: Array<{ index: number; numero: string; type: 'apartado' }> = []
-  let match
-  
-  while ((match = apartadoPattern.exec(texto)) !== null) {
-    const matchIndex = match.index
-    const numeroMatch = match[1]
+  const matches: Array<{ index: number; numero: string; type: 'apartado' | 'letra' }> = []
+  let matchApartado: RegExpExecArray | null
+
+  while ((matchApartado = apartadoPattern.exec(texto)) !== null) {
+    const matchIndex = matchApartado.index
+    const numeroMatch = matchApartado[1]
     
     // Verificar que NO sea parte de una referencia como "artículo 3.", "apartado 2.", etc.
     // Buscar hacia atrás para ver si hay palabras que indiquen una referencia
@@ -100,13 +100,14 @@ function formatArticleText(text: string): string[] {
   
   // Detectar letras (a), b), c), etc.)
   const letraPattern = /\b([a-z])\)\s+/gi
-  while ((match = letraPattern.exec(texto)) !== null) {
+  let matchLetra: RegExpExecArray | null
+  while ((matchLetra = letraPattern.exec(texto)) !== null) {
     // Solo añadir si no está ya en matches (evitar duplicados)
-    const yaExiste = matches.some(m => Math.abs(m.index - match.index) < 5)
+    const yaExiste = matches.some((m) => Math.abs(m.index - (matchLetra?.index ?? 0)) < 5)
     if (!yaExiste) {
       matches.push({
-        index: match.index,
-        numero: match[1],
+        index: matchLetra.index,
+        numero: matchLetra[1],
         type: 'letra'
       })
     }

@@ -99,7 +99,9 @@ export async function POST(req: NextRequest) {
         const outline = snippets.map((s) => ({
           titulo: s.unidad,
           resumen: s.texto.split('\n').slice(0, 2).join(' ').slice(0, 200),
-          articulos: Array.from(s.texto.matchAll(/ART[ÍI]CULO\s+\d+[A-Za-z]?/g)).slice(0, 5).map((m) => m[0].replace(/\s+/g, ' ')),
+          articulos: Array.from(s.texto.matchAll(/ART[ÍI]CULO\s+\d+[A-Za-z]?/g))
+            .slice(0, 5)
+            .map((match) => (match as RegExpMatchArray)[0].replace(/\s+/g, ' ')),
         }))
         return NextResponse.json({ ok: true, lawName, mode, length, summary: { tipo: 'estructurado', titular: lawName, resumen: '', puntos_clave: [], estructura: outline, citas: [] }, fast: true, degraded: true })
       }

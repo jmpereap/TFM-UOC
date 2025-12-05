@@ -414,9 +414,15 @@ export function convertBookmarksToMentalOutline(
         currentSeccion.articulos.push(articulo)
         logEvent('mentalOutline.bookmarks.articulo', { numero, rubrica, pageNumber, title, ubicacion: 'seccion', seccion: currentSeccion.codigo_seccion })
       } else if (currentCapitulo) {
+        if (!currentCapitulo.articulos_sin_seccion) {
+          currentCapitulo.articulos_sin_seccion = []
+        }
         currentCapitulo.articulos_sin_seccion.push(articulo)
         logEvent('mentalOutline.bookmarks.articulo', { numero, rubrica, pageNumber, title, ubicacion: 'capitulo', capitulo: currentCapitulo.codigo_capitulo })
       } else {
+        if (!currentTitulo.articulos_sin_capitulo) {
+          currentTitulo.articulos_sin_capitulo = []
+        }
         currentTitulo.articulos_sin_capitulo.push(articulo)
         logEvent('mentalOutline.bookmarks.articulo', { numero, rubrica, pageNumber, title, ubicacion: 'titulo', titulo: currentTitulo.codigo_titulo })
       }
@@ -604,8 +610,10 @@ export function convertBookmarksToMentalOutline(
           })
           
           const tipoDisposicion = match[1].toLowerCase()
-          for (const child of bookmark.children) {
-            processBookmark(child, level + 1, tipoDisposicion)
+          if (bookmark.children && bookmark.children.length > 0) {
+            for (const child of bookmark.children) {
+              processBookmark(child, level + 1, tipoDisposicion)
+            }
           }
           return
         }

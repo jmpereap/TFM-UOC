@@ -571,8 +571,11 @@ export async function POST(req: NextRequest) {
       // Fallback: si solo hay pagesFull, usarlo pero intentar extraer del pie si es necesario
       sourcePages = pagesFull
       // Verificar si los números de página parecen válidos (no todos son 1, 2, 3... secuenciales desde 1)
-      const pageNumbers = pagesFull.map((p: any) => typeof p?.num === 'number' ? p.num : 0).filter(n => n > 0)
-      const isSequential = pageNumbers.length > 0 && pageNumbers.every((n, i) => n === i + 1)
+      const pageNumbers = pagesFull
+        .map((p: any) => (typeof p?.num === 'number' ? p.num : 0))
+        .filter((n: number) => n > 0)
+      const isSequential =
+        pageNumbers.length > 0 && pageNumbers.every((n: number, i: number) => n === i + 1)
       
       if (isSequential && pageNumbers.length === pagesFull.length) {
         // Si son secuenciales desde 1, probablemente son índices, no números reales de página
@@ -628,7 +631,7 @@ export async function POST(req: NextRequest) {
       }
       
       // Si debemos extraer del pie de página (método directo)
-      const lines = text.split(/\r?\n/).filter(l => l.trim().length > 0)
+      const lines = text.split(/\r?\n/).filter((line: string) => line.trim().length > 0)
       const lastLines = lines.slice(-10).join('\n') // Últimas 10 líneas no vacías
       
       // Buscar números que aparezcan solos en líneas (muy común en pies de página)
@@ -662,8 +665,9 @@ export async function POST(req: NextRequest) {
         for (const pattern of footerPatterns) {
           const matches = Array.from(lastLines.matchAll(new RegExp(pattern.source, 'gmi')))
           for (const match of matches) {
-            if (match[1]) {
-              const foundPageNum = parseInt(match[1], 10)
+            const value = (match as RegExpMatchArray)[1]
+            if (value) {
+              const foundPageNum = parseInt(value, 10)
               // Filtrar números que parecen años o muy grandes
               if (foundPageNum > 0 && foundPageNum < 1000) {
                 pageNum = foundPageNum

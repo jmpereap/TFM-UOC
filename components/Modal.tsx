@@ -1,51 +1,74 @@
-"use client";
+'use client'
 
-import { useEffect, useRef } from 'react'
-import type { ReactNode } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { createPortal } from 'react-dom'
 
-type Props = { open: boolean; onClose: () => void; title?: string; children: ReactNode }
+type ModalProps = {
+  open: boolean
+  title?: string
+  onClose?: () => void
+  children: React.ReactNode
+}
 
-export default function Modal({ open, onClose, title, children }: Props) {
-  const ref = useRef<HTMLDivElement>(null)
+export default function Modal({ open, title, onClose, children }: ModalProps) {
+  const [mounted, setMounted] = useState(false)
+
+  useEffect(() => {
+    setMounted(true)
+    return () => setMounted(false)
+  }, [])
 
   useEffect(() => {
     if (!open) return
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        onClose?.()
+      }
     }
-    document.addEventListener('keydown', onKey)
-    return () => document.removeEventListener('keydown', onKey)
+    document.addEventListener('keydown', onKeyDown)
+    return () => document.removeEventListener('keydown', onKeyDown)
   }, [open, onClose])
 
-  if (!open) return null
+  useEffect(() => {
+    if (!open) return
+    const { body } = document
+    const prevOverflow = body.style.overflow
+    body.style.overflow = 'hidden'
+    return () => {
+      body.style.overflow = prevOverflow
+    }
+  }, [open])
 
-  return (
-    <div aria-modal className="fixed inset-0 z-50 flex items-center justify-center">
-      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
+  const content = useMemo(() => {
+    if (!open) return null
+    return (
       <div
-        ref={ref}
+        className="fixed inset-0 z-50 flex items-center justify-center p-4"
         role="dialog"
+        aria-modal="true"
         aria-label={title}
-        className="relative z-10 max-h-[80vh] w-full max-w-2xl overflow-auto rounded-2xl bg-white p-4 shadow-xl"
       >
-        <div className="flex items-center justify-between mb-2">
-          <h2 className="text-sm font-semibold text-slate-800">{title}</h2>
-          <button onClick={onClose} className="px-2 py-1 text-sm rounded-lg bg-slate-200">Cerrar</button>
+        <div className="absolute inset-0 bg-slate-900/50" onClick={onClose} />
+        <div className="relative z-10 w-full max-w-lg rounded-2xl bg-white p-4 shadow-xl">
+          <div className="flex items-start justify-between gap-4">
+            {title && <h2 className="text-lg font-semibold text-slate-900">{title}</h2>}
+            <button
+              type="button"
+              aria-label="Cerrar modal"
+              onClick={onClose}
+              className="text-slate-500 hover:text-slate-700"
+            >
+              ✕
+            </button>
+          </div>
+          <div className="mt-3 max-h-[70vh] overflow-auto text-sm text-slate-700">{children}</div>
         </div>
-        {children}
       </div>
-    </div>
-  )
+    )
+  }, [children, onClose, open, title])
+
+  if (!mounted) return null
+  return createPortal(content, document.body)
 }
-
-
-
-
-
-
-
-
-
-
 
 

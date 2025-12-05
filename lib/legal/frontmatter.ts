@@ -1,4 +1,4 @@
-import type { PageTxt } from '@/lib/utils/pageStats'
+import type { PageTxt, PageStats } from '@/lib/utils/pageStats'
 import { computeAllStats } from '@/lib/utils/pageStats'
 
 export type FrontCfg = {
@@ -32,7 +32,7 @@ export function defaultFrontmatterConfig(): FrontCfg {
 }
 
 export function detectFrontMatter(pages: PageTxt[], cfg: FrontCfg = {}) {
-  const stats = computeAllStats(pages)
+  const stats: PageStats[] = computeAllStats(pages)
   const drop = new Set<number>()
   if (!pages?.length) return drop
 
