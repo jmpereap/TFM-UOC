@@ -39,8 +39,8 @@ function formatArticleText(text: string): string[] {
   // IMPORTANTE: Solo detectar si está al inicio de un párrafo, no cuando es parte de una referencia
   // Ejemplo: "artículo 3." NO debe marcar inicio de párrafo, pero "3. Texto" SÍ debe
   const apartadoPattern = /\b(\d+)\.\s+/g
-  const matches: Array<{ index: number; numero: string; type: 'apartado' }> = []
-  let match
+  const matches: Array<{ index: number; numero: string; type: 'apartado' | 'letra' }> = []
+  let match: RegExpExecArray | null
   
   while ((match = apartadoPattern.exec(texto)) !== null) {
     const matchIndex = match.index
@@ -102,7 +102,7 @@ function formatArticleText(text: string): string[] {
   const letraPattern = /\b([a-z])\)\s+/gi
   while ((match = letraPattern.exec(texto)) !== null) {
     // Solo añadir si no está ya en matches (evitar duplicados)
-    const yaExiste = matches.some(m => Math.abs(m.index - match.index) < 5)
+    const yaExiste = matches.some((m) => Math.abs(m.index - (match?.index ?? 0)) < 5)
     if (!yaExiste) {
       matches.push({
         index: match.index,
