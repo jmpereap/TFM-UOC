@@ -1881,6 +1881,13 @@ export default function GeneratePage() {
   const [generating, setGenerating] = useState(false)
   const [genError, setGenError] = useState<string | null>(null)
   const [includeCorrect, setIncludeCorrect] = useLocalStorage<boolean>('tfm.includeCorrect', true)
+  const [legalGuess, setLegalGuess] = useState<boolean | null>(null)
+  const [legalScore, setLegalScore] = useState<number | null>(null)
+  const [nonLegalOutline, setNonLegalOutline] = useState<string | null>(null)
+  const [nonLegalTitle, setNonLegalTitle] = useState<string>('🧠 Esquema mental')
+  const [nonLegalLoading, setNonLegalLoading] = useState(false)
+  const [nonLegalError, setNonLegalError] = useState<string | null>(null)
+  const [isNonLegalOnlyView, setIsNonLegalOnlyView] = useState(false)
   const [sumMode, setSumMode] = useState<'ejecutivo' | 'estructurado'>('estructurado')
   const [sumLen, setSumLen] = useState<'corto' | 'medio' | 'largo'>('medio')
   const [summaryMode, setSummaryMode] = useState<'rapido' | 'exhaustivo'>('exhaustivo')
@@ -1915,7 +1922,11 @@ export default function GeneratePage() {
   useEffect(() => {
     if (typeof window !== 'undefined') {
       const params = new URLSearchParams(window.location.search)
-      setIsOutlineOnlyView(params.get('view') === 'outline')
+      const viewParam = params.get('view')
+      const isOutlineView = viewParam === 'outline'
+      const isNonLegalView = viewParam === 'nonlegal'
+      setIsOutlineOnlyView(isOutlineView)
+      setIsNonLegalOnlyView(isNonLegalView)
     }
   }, [])
   
@@ -2014,8 +2025,20 @@ export default function GeneratePage() {
         // Ignorar errores al cargar desde localStorage
       }
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOutlineOnlyView]) // Solo ejecutar cuando cambia isOutlineOnlyView
+  }, [isOutlineOnlyView, mentalOutline])
+
+  useEffect(() => {
+    if (isNonLegalOnlyView) {
+      try {
+        const savedNonLegalOutline = localStorage.getItem('tfm.nonLegalOutline')
+        const savedNonLegalTitle = localStorage.getItem('tfm.nonLegalTitle')
+        if (savedNonLegalOutline) setNonLegalOutline(savedNonLegalOutline)
+        if (savedNonLegalTitle) setNonLegalTitle(savedNonLegalTitle)
+      } catch (e) {
+        // Ignorar errores
+      }
+    }
+  }, [isNonLegalOnlyView])
   const unansweredVisible = useMemo(
     () => pageItems.reduce((acc, _, i) => {
       const originalIndex = items.findIndex(item => item === pageItems[i])
@@ -2142,6 +2165,10 @@ export default function GeneratePage() {
       setBookmarks(data.bookmarks || []) // Guardar bookmarks del PDF
       setMentalOutline(null)
       setMentalOutlineError(null)
+      setLegalGuess(typeof data?.meta?.isLegalGuess === 'boolean' ? data.meta.isLegalGuess : null)
+      setLegalScore(typeof data?.meta?.legalScore === 'number' ? data.meta.legalScore : null)
+      setNonLegalOutline(null)
+      setNonLegalError(null)
       setSelectedArticle(null) // Limpiar el artículo seleccionado al cargar un nuevo PDF
       setSelectedDisposition(null) // Limpiar la disposición seleccionada al cargar un nuevo PDF
       if (!userEditedLawName) {
@@ -2152,6 +2179,8 @@ export default function GeneratePage() {
       setUploadError(e?.message || 'Error subiendo el PDF.')
       setPagesCount(null)
       setBlocks([])
+      setLegalGuess(null)
+      setLegalScore(null)
     } finally {
       setUploading(false)
     }
@@ -2438,6 +2467,51 @@ export default function GeneratePage() {
       setMentalOutlineError(e?.message || 'Error generando esquema desde bookmarks')
     } finally {
       setMentalOutlineLoading(false)
+    }
+  }
+
+  async function generateNonLegalOutline() {
+    if (!blocks.length) {
+      setNonLegalError('Primero sube el PDF y espera a que se detecten los bloques.')
+      return
+    }
+    setNonLegalLoading(true)
+    setNonLegalError(null)
+    try {
+      const payload = {
+        title: lawName || pdfFile?.name || 'Documento',
+        blocks: blocks.map((b: any) => ({
+          text: b.text,
+          startPage: b.startPage,
+          endPage: b.endPage,
+        })),
+      }
+      const res = await fetch('/api/non-legal-outline', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+      const data = await res.json()
+      if (!res.ok || !data?.ok) {
+        throw new Error(data?.error || 'Error generando esquema no legal')
+      }
+      const outlineText = `${data.title || ''}\n${data.outline}`
+      setNonLegalTitle(data.title || '🧠 Esquema mental')
+      setNonLegalOutline(outlineText)
+      try {
+        localStorage.setItem('tfm.nonLegalOutline', outlineText)
+        localStorage.setItem('tfm.nonLegalTitle', data.title || '🧠 Esquema mental')
+      } catch {
+        // Ignore storage errors
+      }
+      setTimeout(() => {
+        const url = window.location.href.split('?')[0] + '?view=nonlegal'
+        window.open(url, '_blank', 'width=1600,height=1000')
+      }, 50)
+    } catch (e: any) {
+      setNonLegalError(e?.message || 'Error generando esquema no legal')
+    } finally {
+      setNonLegalLoading(false)
     }
   }
 
@@ -2928,6 +3002,25 @@ export default function GeneratePage() {
     return null // Se está redirigiendo
   }
 
+  if (isNonLegalOnlyView) {
+    return (
+      <div className="min-h-screen bg-white text-slate-900">
+        <div className="mx-auto max-w-5xl px-4 py-6">
+          <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+            <div className="text-lg font-semibold mb-3">{nonLegalTitle}</div>
+            {nonLegalOutline ? (
+              <pre className="whitespace-pre-wrap text-sm text-slate-800">{nonLegalOutline}</pre>
+            ) : (
+              <div className="text-sm text-slate-600">
+                No se encontró el esquema no legal. Genera uno desde la vista principal.
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="min-h-screen bg-white">
       <section className="sticky top-0 z-30 bg-white/85 backdrop-blur supports-[backdrop-filter]:bg-white/60 border-b">
@@ -3102,7 +3195,6 @@ export default function GeneratePage() {
                       onClick={generateMentalOutlineFromBookmarks}
                       disabled={(() => {
                         if (mentalOutlineLoading || !bookmarks.length || !pagesCount) return true
-                        // Contar todos los bookmarks recursivamente (incluyendo hijos)
                         const countAllBookmarks = (items: any[]): number => {
                           let count = 0
                           for (const item of items) {
@@ -3134,55 +3226,66 @@ export default function GeneratePage() {
                         if (totalBookmarks <= pagesCount) {
                           return `Los bookmarks (${totalBookmarks}) deben ser más que las páginas (${pagesCount})`
                         }
-                        return "Genera el esquema mental desde los bookmarks/marcadores del PDF"
+                        return 'Genera el esquema mental desde los bookmarks/marcadores del PDF'
                       })()}
                     >
                       {mentalOutlineLoading ? 'Generando…' : 'Desde Bookmarks'}
                     </button>
                     <button
                       type="button"
-                      onClick={generateMentalOutlineDirect}
-                      disabled={(() => {
-                        if (mentalOutlineLoading || !pagesFull.length) return true
-                        // Bloquear si "Desde Bookmarks" está disponible
-                        const countAllBookmarks = (items: any[]): number => {
-                          let count = 0
-                          for (const item of items) {
-                            count++
-                            if (item.children && Array.isArray(item.children) && item.children.length > 0) {
-                              count += countAllBookmarks(item.children)
-                            }
-                          }
-                          return count
+                  onClick={generateMentalOutlineDirect}
+                  disabled={(() => {
+                    if (mentalOutlineLoading || !pagesFull.length) return true
+                    // Si hay bookmarks suficientes, usar el botón específico
+                    const countAllBookmarks = (items: any[]): number => {
+                      let count = 0
+                      for (const item of items) {
+                        count++
+                        if (item.children && Array.isArray(item.children) && item.children.length > 0) {
+                          count += countAllBookmarks(item.children)
                         }
-                        const totalBookmarks = bookmarks.length > 0 ? countAllBookmarks(bookmarks) : 0
-                        const bookmarksAvailable =
-                          typeof pagesCount === 'number' ? totalBookmarks > pagesCount : totalBookmarks > 0
-                        return !!bookmarksAvailable // Bloquear si bookmarks están disponibles
-                      })()}
-                      className="h-9 px-3 rounded-lg bg-green-600 text-white text-sm disabled:opacity-50"
-                      title={(() => {
-                        const countAllBookmarks = (items: any[]): number => {
-                          let count = 0
-                          for (const item of items) {
-                            count++
-                            if (item.children && Array.isArray(item.children) && item.children.length > 0) {
-                              count += countAllBookmarks(item.children)
-                            }
-                          }
-                          return count
+                      }
+                      return count
+                    }
+                    const totalBookmarks = bookmarks.length > 0 ? countAllBookmarks(bookmarks) : 0
+                    const bookmarksAvailable =
+                      typeof pagesCount === 'number' ? totalBookmarks > pagesCount : totalBookmarks > 0
+                    // Solo habilitado si es legal y no hay bookmarks suficientes
+                    if (bookmarksAvailable) return true
+                    if (legalGuess !== true) return true
+                    return false
+                  })()}
+                  className="h-9 px-3 rounded-lg bg-green-600 text-white text-sm disabled:opacity-50"
+                  title={(() => {
+                    const countAllBookmarks = (items: any[]): number => {
+                      let count = 0
+                      for (const item of items) {
+                        count++
+                        if (item.children && Array.isArray(item.children) && item.children.length > 0) {
+                          count += countAllBookmarks(item.children)
                         }
-                        const totalBookmarks = bookmarks.length > 0 ? countAllBookmarks(bookmarks) : 0
-                        const bookmarksAvailable =
-                          typeof pagesCount === 'number' ? totalBookmarks > pagesCount : totalBookmarks > 0
-                        if (bookmarksAvailable) {
-                          return 'Usa "Desde Bookmarks" para generar el esquema cuando hay bookmarks disponibles'
-                        }
-                        return "Genera el esquema mental directamente desde el índice del PDF sin usar IA"
-                      })()}
-                    >
-                      {mentalOutlineLoading ? 'Generando…' : 'Generar'}
-                    </button>
+                      }
+                      return count
+                    }
+                    const totalBookmarks = bookmarks.length > 0 ? countAllBookmarks(bookmarks) : 0
+                    const bookmarksAvailable =
+                      typeof pagesCount === 'number' ? totalBookmarks > pagesCount : totalBookmarks > 0
+                    if (bookmarksAvailable) return 'Usa "Desde Bookmarks" para generar el esquema cuando hay bookmarks disponibles'
+                    if (legalGuess !== true) return 'Solo disponible cuando el documento se detecta como legal'
+                    return 'Generar esquema legal directo (sin bookmarks)'
+                  })()}
+                >
+                  {mentalOutlineLoading ? 'Generando…' : 'Esquema legal'}
+                </button>
+                <button
+                  type="button"
+                  onClick={generateNonLegalOutline}
+                  disabled={nonLegalLoading || !blocks.length}
+                  className="h-9 px-3 rounded-lg bg-slate-700 text-white text-sm disabled:opacity-50"
+                  title="Generar esquema didáctico (no legal)"
+                >
+                  {nonLegalLoading ? 'Esquematizando…' : 'Esquema no legal'}
+                </button>
                     {/* Botones ocultos */}
                     {/* <button
                       type="button"
@@ -3289,8 +3392,19 @@ export default function GeneratePage() {
                 ↺ Restablecer
               </button>
             </div>
-            <div className="text-slate-600" aria-live="polite">
-              Páginas: {pagesCount ?? '—'}
+            <div className="flex items-center gap-2 text-slate-600" aria-live="polite">
+              {legalGuess !== null && (
+                <span
+                  className={`inline-flex items-center rounded-full border px-3 py-1 text-xs font-medium ${
+                    legalGuess
+                      ? 'bg-emerald-50 border-emerald-200 text-emerald-700'
+                      : 'bg-amber-50 border-amber-200 text-amber-700'
+                  }`}
+                >
+                  {legalGuess ? 'Detectado legal' : 'Detectado no legal'}
+                </span>
+              )}
+              <span>Páginas: {pagesCount ?? '—'}</span>
             </div>
           </div>
           {!!uploadError && <div className="mt-2 text-xs text-red-600">{uploadError}</div>}
