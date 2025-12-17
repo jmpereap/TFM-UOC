@@ -985,6 +985,50 @@ La presente Ley Orgánica entrará en vigor el día siguiente al de su publicaci
 2. **Generación:** Cliente → `/api/mental-outline/generate-fiche` o `/api/mental-outline/generate-fiche-disposition` → Retorna ficha formateada
 3. **Descarga:** Cliente descarga directamente como TXT o PDF desde el frontend
 
+---
+
+# Exportación Esquema No Legal
+
+## a) Tipo / Respuesta
+
+El esquema no legal se genera como texto plano en el frontend y no tiene un tipo estructurado más allá de la respuesta del endpoint.
+
+- Endpoint: `/api/non-legal-outline` (POST)
+- Respuesta: `{ ok: true, title: string, outline: string }`
+- Almacenamiento en cliente: `localStorage` (`tfm.nonLegalOutline`, `tfm.nonLegalTitle`)
+
+## b) Exportación TXT
+
+**Implementación:** `app/generate/page.tsx` (vista “solo esquema no legal”).  
+**Formato:** Texto plano, se descarga desde el navegador.
+
+- Nombre sugerido: `{titulo_sin_espacios}.txt` (ej. `Esquema_mental.txt`)
+- Codificación: `text/plain;charset=utf-8`
+- Contenido: `outline` tal cual (viñetas en texto plano)
+
+## c) Exportación PDF
+
+**Implementación:** `app/generate/page.tsx` con `pdf-lib`.  
+**Formato:** A4, fuente Helvetica.
+
+- Nombre sugerido: `{titulo_sin_espacios}.pdf`
+- Características:
+  - Título en negrita (HelveticaBold), sanitizado (sin emojis/pictogramas).
+  - Mantiene sangrías: se calcula indentación por espacios y bullets al inicio de línea, desplazando X según nivel.
+  - Viñetas normalizadas a guiones para evitar problemas de codificación.
+  - Salto de página automático, margen 50 pts, alto de línea 16 pts, tamaño de fuente 12 pts.
+  - Se elimina emoji 🧠 u otros pictográficos para compatibilidad WinAnsi.
+
+## d) Límites y notas
+
+- Sin límite explícito de tamaño del outline; depende de la memoria del navegador.
+- El PDF se genera 100% en cliente; no hay endpoint de exportación para el esquema no legal.
+
+## e) Archivos relacionados
+
+- `app/api/non-legal-outline/route.ts` — generación del outline no legal.
+- `app/generate/page.tsx` — descarga TXT/PDF e interfaz de vista “solo esquema no legal”.
+
 
 
 

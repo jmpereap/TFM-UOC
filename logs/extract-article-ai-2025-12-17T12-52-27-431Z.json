@@ -1,5 +1,5 @@
 {
-  "timestamp": "2025-12-01T14:01:38.387Z",
+  "timestamp": "2025-12-17T12:52:27.432Z",
   "source": "\"\"",
   "articleNumber": "11",
   "articuloPagina": 6,
@@ -13,23 +13,23 @@
   "aiResponse": {
     "articleNumber": "11",
     "title": null,
-    "fullText": "Artículo 11.\n1. La nacionalidad española se adquiere, se conserva y se pierde de acuerdo con lo\nestablecido por la ley.\n2. Ningún español de origen podrá ser privado de su nacionalidad.\n3. El Estado podrá concertar tratados de doble nacionalidad con los países\niberoamericanos o con aquellos que hayan tenido o tengan una particular vinculación con\nEspaña. En estos mismos países, aun cuando no reconozcan a sus ciudadanos un derecho\nrecíproco, podrán naturalizarse los españoles sin perder su nacionalidad de origen.",
+    "fullText": "Artículo 11.\n1. La nacionalidad española se adquiere, se conserva y se pierde de acuerdo con lo\nestablecido por la ley.\n2. Ningún español de origen podrá ser privado de su nacionalidad.\n3. El Estado podrá concertar tratados de doble nacionalidad con los países\niberoamericanos o con aquellos que hayan tenido o tengan una particular vinculación con\nEspaña. En estos mismos países, aun cuando no reconozcan a sus ciudadanos un derecho\nrecíproco, podrán naturalizarse los españoles sin perder su nacionalidad de origen.\n",
     "startsAtIndex": 0,
-    "endsAtIndex": 267,
-    "nextHeaderPreview": "Artículo 12.\nLos españoles son mayores de edad a los dieciocho años."
+    "endsAtIndex": 246,
+    "nextHeaderPreview": "Artículo 12."
   },
   "extractedArticle": {
     "articleNumber": "11",
     "title": null,
-    "fullText": "Artículo 11.\n1. La nacionalidad española se adquiere, se conserva y se pierde de acuerdo con lo\nestablecido por la ley.\n2. Ningún español de origen podrá ser privado de su nacionalidad.\n3. El Estado podrá concertar tratados de doble nacionalidad con los países\niberoamericanos o con aquellos que hayan tenido o tengan una particular vinculación con\nEspaña. En estos mismos países, aun cuando no reconozcan a sus ciudadanos un derecho\nrecíproco, podrán naturalizarse los españoles sin perder su nacionalidad de origen.",
+    "fullText": "Artículo 11.\n1. La nacionalidad española se adquiere, se conserva y se pierde de acuerdo con lo\nestablecido por la ley.\n2. Ningún español de origen podrá ser privado de su nacionalidad.\n3. El Estado podrá concertar tratados de doble nacionalidad con los países\niberoamericanos o con aquellos que hayan tenido o tengan una particular vinculación con\nEspaña. En estos mismos países, aun cuando no reconozcan a sus ciudadanos un derecho\nrecíproco, podrán naturalizarse los españoles sin perder su nacionalidad de origen.\n",
     "startsAtIndex": 0,
-    "endsAtIndex": 267,
-    "nextHeaderPreview": "Artículo 12.\nLos españoles son mayores de edad a los dieciocho años."
+    "endsAtIndex": 246,
+    "nextHeaderPreview": "Artículo 12."
   },
   "resumen": "Artículo 11. 1. La nacionalidad española se adquiere, se conserva y se pierde según lo que establece la ley. 2. Ningún español de origen podrá ser privado de su nacionalidad. 3. El Estado puede establecer tratados de doble nacionalidad con países iberoamericanos o aquellos con los que tenga una vinculación especial. En estos países, aunque no reconozcan un derecho recíproco a sus ciudadanos, los españoles podrán naturalizarse sin perder su nacionalidad de origen.",
   "chunkLength": 12000,
   "chunkPreview": "Artículo 11.\n1. La nacionalidad española se adquiere, se conserva y se pierde de acuerdo con lo\nestablecido por la ley.\n2. Ningún español de origen podrá ser privado de su nacionalidad.\n3. El Estado podrá concertar tratados de doble nacionalidad con los países\niberoamericanos o con aquellos que hayan tenido o tengan una particular vinculación con\nEspaña. En estos mismos países, aun cuando no reconozcan a sus ciudadanos un derecho\nrecíproco, podrán naturalizarse los españoles sin perder su nacion",
-  "fullTextLength": 517,
+  "fullTextLength": 518,
   "fullTextPreview": "Artículo 11.\n1. La nacionalidad española se adquiere, se conserva y se pierde de acuerdo con lo\nestablecido por la ley.\n2. Ningún español de origen podrá ser privado de su nacionalidad.\n3. El Estado podrá concertar tratados de doble nacionalidad con los países\niberoamericanos o con aquellos que hayan tenido o tengan una particular vinculación con\nEspaña. En estos mismos países, aun cuando no reconozcan a sus ciudadanos un derecho\nrecíproco, podrán naturalizarse los españoles sin perder su nacion",
   "resumenLength": 467,
   "resumenPreview": "Artículo 11. 1. La nacionalidad española se adquiere, se conserva y se pierde según lo que establece la ley. 2. Ningún español de origen podrá ser privado de su nacionalidad. 3. El Estado puede establecer tratados de doble nacionalidad con países iberoamericanos o aquellos con los que tenga una vinc"

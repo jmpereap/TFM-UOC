@@ -72,3 +72,20 @@ export default function Modal({ open, title, onClose, children }: ModalProps) {
 }
 
 
+<<<<<<< HEAD
+=======
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+>>>>>>> feature/nonlegal-outline

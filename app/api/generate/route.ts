@@ -10,6 +10,8 @@ import { withLimit } from 'lib/utils/withLimit'
 
 type Block = { index: number; startPage: number; endPage: number; text: string }
 
+const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max)
+
 const InputSchema = z.object({
   lawName: z.string().min(1),
   n: z.number().int().min(1).max(20),
@@ -43,16 +45,54 @@ export async function POST(req: Request) {
     const json = await req.json()
     const { lawName, n, blocks, difficultyDistribution, preferredLevel } = InputSchema.parse(json)
     const m = blocks.length
-    
+    const requestedQuestions = n
+
+    // Calcular límite máximo por bloque según tamaño de texto
+    const perBlockMax = blocks.map((b) => {
+      const textLen = typeof b?.text === 'string' ? b.text.length : 0
+      return clamp(Math.floor(textLen / 800) + 1, 2, requestedQuestions)
+    })
+    const totalMaxQuestions = perBlockMax.reduce((acc, val) => acc + val, 0)
+    const effectiveQuestions = Math.min(requestedQuestions, totalMaxQuestions)
+
+    if (totalMaxQuestions === 0) {
+      logEvent('generate.error', {
+        reqId,
+        error: 'No hay texto suficiente para generar preguntas',
+        perBlockMax,
+        totalMaxQuestions,
+      })
+      console.log('[generate] perBlockMax (no texto suficiente)', { reqId, perBlockMax, totalMaxQuestions })
+      return NextResponse.json(
+        { ok: false, error: 'El texto es demasiado corto para generar preguntas.' },
+        { status: 400 }
+      )
+    }
+
+    if (effectiveQuestions < requestedQuestions) {
+      logEvent('generate.questions.capped', {
+        reqId,
+        requestedQuestions,
+        effectiveQuestions,
+        perBlockMax,
+        totalMaxQuestions,
+      })
+      console.log('[generate] perBlockMax (capped)', { reqId, perBlockMax, totalMaxQuestions, requestedQuestions, effectiveQuestions })
+    }
+
     // Log inicial: número de bloques vs preguntas solicitadas
     logEvent('generate.distribution.start', {
       reqId,
-      requestedQuestions: n,
+      requestedQuestions,
+      effectiveQuestions,
       numberOfBlocks: m,
-      blocksLessThanQuestions: m < n,
+      blocksLessThanQuestions: m < effectiveQuestions,
       preferredLevel: preferredLevel || null,
       hasDifficultyDistribution: !!difficultyDistribution,
+      perBlockMax,
+      totalMaxQuestions,
     })
+    console.log('[generate] perBlockMax', { reqId, perBlockMax, totalMaxQuestions, requestedQuestions, effectiveQuestions })
     
     // Prioridad: preferredLevel > difficultyDistribution > distribución uniforme
     let plan: number[]
@@ -60,15 +100,15 @@ export async function POST(req: Request) {
     
     if (preferredLevel) {
       // Usar distribución por nivel preferido (al menos 90% del nivel seleccionado)
-      difficultyPlan = distributeByPreferredLevel(n, preferredLevel, m)
+      difficultyPlan = distributeByPreferredLevel(effectiveQuestions, preferredLevel, m)
       // Calcular el total de preguntas por bloque
       plan = difficultyPlan.map(d => d.basico + d.medio + d.avanzado)
     } else if (difficultyDistribution) {
       // Lógica existente: usar distribución manual si está presente
       const total = difficultyDistribution.basico + difficultyDistribution.medio + difficultyDistribution.avanzado
-      if (total !== n) {
+      if (total !== effectiveQuestions) {
         return NextResponse.json(
-          { ok: false, error: `La suma de dificultades (${total}) debe ser igual a n (${n})` },
+          { ok: false, error: `La suma de dificultades (${total}) debe ser igual a n (${effectiveQuestions})` },
           { status: 400 }
         )
       }
@@ -77,14 +117,15 @@ export async function POST(req: Request) {
       plan = difficultyPlan.map(d => d.basico + d.medio + d.avanzado)
     } else {
       // Distribución uniforme (comportamiento por defecto)
-      plan = distributeQuestions(n, m)
+      plan = distributeQuestions(effectiveQuestions, m)
     }
     
     // Log de la distribución resultante
     const planSum = plan.reduce((sum, val) => sum + val, 0)
     logEvent('generate.distribution.result', {
       reqId,
-      requestedQuestions: n,
+      requestedQuestions,
+      effectiveQuestions,
       numberOfBlocks: m,
       distributionPlan: plan,
       distributionSum: planSum,
@@ -104,8 +145,9 @@ export async function POST(req: Request) {
 
     const tasks: Array<() => Promise<MCQItem[]>> = blocks.map((b, i) => async () => {
       const blockStartTime = Date.now()
-      const qi = plan[i]
-      if (!qi) {
+      const qiPlanned = plan[i]
+      const blockCap = perBlockMax[i] ?? requestedQuestions
+      if (!qiPlanned) {
         logEvent('generate.block.skipped', {
           reqId,
           blockIndex: i,
@@ -115,14 +157,29 @@ export async function POST(req: Request) {
       }
       const pagesRange = `p. ${b.startPage}–${b.endPage}`
       const safeText = truncateByChars(b.text, 10000)
+      const blockTextChars = safeText.length
+      const maxQuestionsByText = clamp(Math.floor(blockTextChars / 800) + 1, 2, requestedQuestions)
+      const qi = clamp(qiPlanned, 0, Math.min(blockCap, maxQuestionsByText))
       const blockDifficultyDist = difficultyPlan ? difficultyPlan[i] : undefined
-      const prompt = buildPrompt({ 
-        lawName, 
-        pagesRange, 
-        blockText: safeText, 
+      if (!qi) {
+        logEvent('generate.block.skipped', {
+          reqId,
+          blockIndex: i,
+          reason: 'no_questions_after_clamp',
+          planned: qiPlanned,
+          blockCap,
+          maxQuestionsByText,
+          blockTextChars,
+        })
+        return []
+      }
+      const prompt = buildPrompt({
+        lawName,
+        pagesRange,
+        blockText: safeText,
         n: qi,
         difficultyDistribution: blockDifficultyDist,
-        preferredLevel: preferredLevel || undefined
+        preferredLevel: preferredLevel || undefined,
       })
       const pChars = prompt.length
       
@@ -130,10 +187,23 @@ export async function POST(req: Request) {
         reqId,
         blockIndex: i,
         questionsRequested: qi,
+        questionsPlanned: qiPlanned,
+        blockCap,
+        maxQuestionsByText,
         blockPages: pagesRange,
         promptChars: pChars,
         blockTextChars: safeText.length,
         difficultyDistribution: blockDifficultyDist,
+      })
+      // Log en consola el tamaño del texto del bloque y el cap aplicado
+      console.log('[generate] block caps', {
+        reqId,
+        blockIndex: i,
+        blockTextChars: safeText.length,
+        maxQuestionsByText,
+        blockCap,
+        questionsPlanned: qiPlanned,
+        questionsRequested: qi,
       })
       
       try {
@@ -207,7 +277,7 @@ export async function POST(req: Request) {
         seen.add(key)
         deduped.push(q)
       }
-      if (deduped.length >= n) break
+      if (deduped.length >= effectiveQuestions) break
     }
 
     if (deduped.length === 0) {
@@ -218,7 +288,8 @@ export async function POST(req: Request) {
       logEvent('generate.empty', { 
         reqId, 
         latencyMs: dt, 
-        requested: n,
+        requested: requestedQuestions,
+        effectiveQuestions,
         blocksProcessed,
         totalItemsFromBlocks,
         blocksWithItems,
@@ -236,7 +307,23 @@ export async function POST(req: Request) {
     }
 
     const dt = Date.now() - t0
-    logEvent('generate.done', { reqId, latencyMs: dt, requested: n, returned: deduped.length })
+    logEvent('generate.done', {
+      reqId,
+      latencyMs: dt,
+      requested: requestedQuestions,
+      effectiveQuestions,
+      returned: deduped.length,
+      totalMaxQuestions,
+      perBlockMax,
+    })
+    // Log en consola para inspección rápida
+    console.log('[generate] total questions', {
+      reqId,
+      requested: requestedQuestions,
+      effectiveQuestions,
+      returned: deduped.length,
+      totalMaxQuestions,
+    })
 
     return NextResponse.json({ ok: true, items: deduped })
   } catch (err: unknown) {

@@ -101,7 +101,11 @@ export async function POST(req: NextRequest) {
           resumen: s.texto.split('\n').slice(0, 2).join(' ').slice(0, 200),
           articulos: Array.from(s.texto.matchAll(/ART[ÍI]CULO\s+\d+[A-Za-z]?/g))
             .slice(0, 5)
+<<<<<<< HEAD
             .map((match) => (match as RegExpMatchArray)[0].replace(/\s+/g, ' ')),
+=======
+            .map((m) => (m as RegExpMatchArray)[0].replace(/\s+/g, ' ')),
+>>>>>>> feature/nonlegal-outline
         }))
         return NextResponse.json({ ok: true, lawName, mode, length, summary: { tipo: 'estructurado', titular: lawName, resumen: '', puntos_clave: [], estructura: outline, citas: [] }, fast: true, degraded: true })
       }

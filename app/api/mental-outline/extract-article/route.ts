@@ -631,7 +631,11 @@ export async function POST(req: NextRequest) {
       }
       
       // Si debemos extraer del pie de página (método directo)
+<<<<<<< HEAD
       const lines = text.split(/\r?\n/).filter((line: string) => line.trim().length > 0)
+=======
+      const lines = text.split(/\r?\n/).filter((l: string) => l.trim().length > 0)
+>>>>>>> feature/nonlegal-outline
       const lastLines = lines.slice(-10).join('\n') // Últimas 10 líneas no vacías
       
       // Buscar números que aparezcan solos en líneas (muy común en pies de página)

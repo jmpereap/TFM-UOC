@@ -234,7 +234,11 @@ export async function POST(req: NextRequest) {
       }
       
       // Extraer número del pie de página
+<<<<<<< HEAD
       const lines = text.split(/\r?\n/).filter((line: string) => line.trim().length > 0)
+=======
+      const lines = text.split(/\r?\n/).filter((l: string) => l.trim().length > 0)
+>>>>>>> feature/nonlegal-outline
       for (let i = lines.length - 1; i >= Math.max(0, lines.length - 10); i--) {
         const line = lines[i].trim()
         if (/^\d{1,3}$/.test(line)) {

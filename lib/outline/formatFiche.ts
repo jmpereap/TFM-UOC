@@ -40,11 +40,19 @@ function formatArticleText(text: string): string[] {
   // Ejemplo: "artículo 3." NO debe marcar inicio de párrafo, pero "3. Texto" SÍ debe
   const apartadoPattern = /\b(\d+)\.\s+/g
   const matches: Array<{ index: number; numero: string; type: 'apartado' | 'letra' }> = []
+<<<<<<< HEAD
   let matchApartado: RegExpExecArray | null
 
   while ((matchApartado = apartadoPattern.exec(texto)) !== null) {
     const matchIndex = matchApartado.index
     const numeroMatch = matchApartado[1]
+=======
+  let match: RegExpExecArray | null
+  
+  while ((match = apartadoPattern.exec(texto)) !== null) {
+    const matchIndex = match.index
+    const numeroMatch = match[1]
+>>>>>>> feature/nonlegal-outline
     
     // Verificar que NO sea parte de una referencia como "artículo 3.", "apartado 2.", etc.
     // Buscar hacia atrás para ver si hay palabras que indiquen una referencia
@@ -103,7 +111,11 @@ function formatArticleText(text: string): string[] {
   let matchLetra: RegExpExecArray | null
   while ((matchLetra = letraPattern.exec(texto)) !== null) {
     // Solo añadir si no está ya en matches (evitar duplicados)
+<<<<<<< HEAD
     const yaExiste = matches.some((m) => Math.abs(m.index - (matchLetra?.index ?? 0)) < 5)
+=======
+    const yaExiste = matches.some((m) => Math.abs(m.index - (match?.index ?? 0)) < 5)
+>>>>>>> feature/nonlegal-outline
     if (!yaExiste) {
       matches.push({
         index: matchLetra.index,

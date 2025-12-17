@@ -27,7 +27,7 @@ export function buildPrompt({ lawName, pagesRange, blockText, n, difficultyDistr
     : ''
 
   return `
-Eres un sistema que genera preguntas tipo test sobre legislación española.
+Eres un sistema que genera preguntas tipo test sobre documentación técnica, material de estudio para exámenes/oposiciones y legislación española (cuando el bloque sea normativo).
 
 Objetivo: crear ${n} preguntas (máx. 4 opciones A–D, exactamente 1 correcta), sin repetición, basadas SOLO en el texto del bloque proporcionado.${distText}${preferredLevelText}
 

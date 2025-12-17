@@ -8,6 +8,62 @@ import { extractBookmarks } from 'lib/pdf/extractBookmarks'
 
 export const runtime = 'nodejs'
 
+function guessLegal(pagesFullRaw: Array<{ num: number; text: string }>, metaInfo: Record<string, any>, bookmarks: any[]) {
+  let score = 0
+  const title = String(metaInfo?.Title || metaInfo?.title || '').toLowerCase()
+  const authors = String(metaInfo?.Author || metaInfo?.author || '').toLowerCase()
+  const firstPagesText = pagesFullRaw
+    .slice(0, 5)
+    .map((p) => p.text)
+    .join('\n')
+    .toLowerCase()
+
+  const legalPatterns = [
+    /art[íi]culo\s+\d/,
+    /disposici[oó]n\s+(adicional|transitoria|derogatoria|final)/,
+    /bolet[ií]n oficial/,
+    /t[íi]tulo\s+preliminar/,
+    /\bcap[ií]tulo\b/,
+    /\bsecci[oó]n\b/,
+    /\bled\b/,
+    /\bdecreto\b/,
+    /\borden\b/,
+    /\bles\s+(\d{4}|\d+)/,
+  ]
+
+  const hitsInText = legalPatterns.some((rx) => rx.test(firstPagesText))
+  if (hitsInText) score += 2
+
+  const matchesTitle = /ley|decreto|disposici[oó]n|boe|real decreto/.test(title)
+  if (matchesTitle) score += 2
+
+  const matchesAuthor = /ministerio|boe|juzgado|tribunal|c[oó]digo/.test(authors)
+  if (matchesAuthor) score += 1
+
+  const bookmarkText = JSON.stringify(bookmarks || []).toLowerCase()
+  const hitsBookmarks = /(t[íi]tulo|cap[ií]tulo|art[íi]culo|disposici[oó]n)/.test(bookmarkText)
+  if (hitsBookmarks) score += 2
+
+  console.log('[Upload] guessLegal breakdown', {
+    hitsInText,
+    matchesTitle,
+    matchesAuthor,
+    hitsBookmarks,
+    score,
+    meta: {
+      titleSample: title.slice(0, 80),
+      authorSample: authors.slice(0, 80),
+      pagesScanned: Math.min(5, pagesFullRaw.length),
+      hasBookmarks: Array.isArray(bookmarks) && bookmarks.length > 0,
+    },
+  })
+
+  return {
+    isLegalGuess: score >= 2,
+    legalScore: score,
+  }
+}
+
 function normalizePageText(s: string) {
   return (s || '')
     .replace(/\f/g, '\n')
@@ -70,13 +126,15 @@ export async function POST(req: NextRequest) {
     const blocks = splitIntoBlocks(pages, blockSize, overlap)
     const pdfSchema = buffer.toString('base64')
     const pageStats = computeAllStats(pagesFullRaw)
+    const { isLegalGuess, legalScore } = guessLegal(pagesFullRaw, metaInfo, bookmarks)
+    console.log('[Upload] guessLegal result', { isLegalGuess, legalScore })
 
     return NextResponse.json({
       blocks,
       pagesFull,
       pagesFullRaw, // Incluir también las páginas completas (con front matter) para que generate-direct pueda buscar el índice
       pdfSchema,
-      meta: { numPages: parsed.numPages, info: metaInfo, blockSize, overlap, fileHash },
+      meta: { numPages: parsed.numPages, info: metaInfo, blockSize, overlap, fileHash, isLegalGuess, legalScore },
       frontMatterDropped: Array.from(frontMatter),
       pageStats,
       bookmarks, // Marcadores/bookmarks del PDF
