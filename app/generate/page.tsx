@@ -1910,6 +1910,15 @@ export default function GeneratePage() {
   const [bookmarks, setBookmarks] = useState<any[]>([]) // Bookmarks del PDF
   const [mentalOutlineSource, setMentalOutlineSource] = useState<'bookmarks' | 'direct' | null>(null) // Origen del esquema mental
   const [isOutlineOnlyView, setIsOutlineOnlyView] = useState(false) // Modo "solo esquema" (vista en nueva pestaña)
+  const effectiveQuestionsByText = useMemo(() => {
+    if (!blocks || blocks.length === 0) return n
+    let total = 0
+    for (const b of blocks) {
+      const len = typeof b?.text === 'string' ? b.text.length : 0
+      total += clamp(Math.floor(len / 800) + 1, 2, n)
+    }
+    return Math.min(total, n)
+  }, [blocks, n])
 
   // Verificar autenticación
   useEffect(() => {
@@ -3178,7 +3187,21 @@ export default function GeneratePage() {
                   </select>
                   {preferredLevel && (
                     <span className="text-[11px] text-slate-600 mt-0.5">
-                      Se generarán al menos {Math.ceil(n * (preferredLevel === 'basico' ? 0.95 : 0.90))} preguntas de nivel {preferredLevel === 'basico' ? 'Básico' : preferredLevel === 'medio' ? 'Medio' : 'Avanzado'}
+                      {(() => {
+                        const effectiveTotal = effectiveQuestionsByText
+                        const ratio = preferredLevel === 'basico' ? 0.95 : 0.9
+                        const minByLevel = Math.ceil(effectiveTotal * ratio)
+                        const levelLabel =
+                          preferredLevel === 'basico'
+                            ? 'Básico'
+                            : preferredLevel === 'medio'
+                            ? 'Medio'
+                            : 'Avanzado'
+                        const capped = effectiveTotal < n
+                        return `Se generarán al menos ${minByLevel} preguntas de nivel ${levelLabel}${
+                          capped ? ` (total estimado ${effectiveTotal} enviado a la IA)` : ''
+                        }`
+                      })()}
                     </span>
                   )}
                 </div>
